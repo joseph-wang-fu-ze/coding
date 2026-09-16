@@ -17,6 +17,11 @@ import java.util.Random;
  * <p>各素数下的多项式运算全部用 long（素数 &lt; 2^31，乘积不溢出）；
  * 只有"整数值"（编码后的消息、还原后的相位）用大整数，因为素数较多时 q 远超 64 位。
  */
+/**
+ * @deprecated <b>不要在新代码里使用本类</b>：本模块已降级为交叉校验工具，
+ *     新实现请改用 MPC4J 的 BFV（见 coding/rgsw-lab/Mpc4jRgsw.java）。
+ *     保留原因：① 与 MPC4J 互为独立校验；② 只有它能跑 N=16384 / 451 位模数。
+ */
 public final class RlweOps {
 
     private RlweOps() {

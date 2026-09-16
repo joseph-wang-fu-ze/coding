@@ -9,6 +9,11 @@ import java.util.Random;
  * <p>多项式的表示：<code>long[素数下标][系数下标]</code>，每个系数始终归约到 [0, 对应素数)。
  * 单个素数时就是 1 行；两个素数时就是 2 行——这就是"RNS 表示"的雏形。
  */
+/**
+ * @deprecated <b>不要在新代码里使用本类</b>：本模块已降级为交叉校验工具，
+ *     新实现请改用 MPC4J 的 BFV（见 coding/rgsw-lab/Mpc4jRgsw.java）。
+ *     保留原因：① 与 MPC4J 互为独立校验；② 只有它能跑 N=16384 / 451 位模数。
+ */
 public final class RingOps {
 
     private RingOps() {

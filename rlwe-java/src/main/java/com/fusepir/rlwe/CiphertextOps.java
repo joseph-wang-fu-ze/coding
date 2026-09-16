@@ -23,6 +23,11 @@ import java.math.BigInteger;
  *       拿"Z_t 上的满量程随机多项式"去相乘，在 BFV 里本来就不合法。</li>
  * </ol>
  */
+/**
+ * @deprecated <b>不要在新代码里使用本类</b>：本模块已降级为交叉校验工具，
+ *     新实现请改用 MPC4J 的 BFV（见 coding/rgsw-lab/Mpc4jRgsw.java）。
+ *     保留原因：① 与 MPC4J 互为独立校验；② 只有它能跑 N=16384 / 451 位模数。
+ */
 public final class CiphertextOps {
 
     private CiphertextOps() {

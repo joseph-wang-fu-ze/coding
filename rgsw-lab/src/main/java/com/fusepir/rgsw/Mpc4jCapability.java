@@ -10,7 +10,17 @@ import edu.alibaba.mpc4j.crypto.fhe.seal.Plaintext;
 import edu.alibaba.mpc4j.crypto.fhe.seal.RelinKeys;
 
 /**
- * MPC4J 的 RLWE 能力探针：CAPE 在 RLWE 层需要的四件事能不能做、做得对不对。
+ * ⚠️ 路线：<b>B（纯 Java 移植版）</b>，不是目标路线 native —— 详见 coding/RLWE路线审计.md。
+ *
+ * <p>native 侧的等价物在 `coding/native-jni/`：
+ * <ul>
+ *   <li>{@code src/seal_params_probe.cpp} —— 参数位宽（已成为权威结果：
+ *       N=16384 → 9 素数 / 438 位，工作层 8 素数 / 389 位）；</li>
+ *   <li>{@code SealPirNativeTest} / {@code NativeApiProbe} —— 真 SEAL 上的打包、旋转、
+ *       ct×pt 累加、模数切换、密文×密文（批量 PIR 族接口）。</li>
+ * </ul>
+ *
+ * <p>MPC4J 的 RLWE 能力探针：CAPE 在 RLWE 层需要的四件事能不能做、做得对不对。
  *
  * <p>这不是"能不能编译"的检查，而是把 CAPE 真正要用的运算各跑一遍并核对结果：
  * <ol>

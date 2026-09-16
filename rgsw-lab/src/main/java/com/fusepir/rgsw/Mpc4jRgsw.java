@@ -19,7 +19,17 @@ import java.util.Random;
 /**
  * 建立在 <b>MPC4J 的 BFV</b> 之上的 RGSW 层。
  *
- * <p>与 `com.fusepir.rlwe`（自研 RLWE）的关系：**这是新的主路径，自研那套只作为校验工具保留**。
+ * <h3>⚠️ 路线提示（详见 coding/RLWE路线审计.md）</h3>
+ * 本文件走的是 <b>路线 B：纯 Java 移植版</b>（`edu.alibaba.mpc4j.crypto.fhe.seal.*`，
+ * 即 `coding/lib/mpc4j-crypto-fhe-seal.jar`），<b>不是</b>目标路线
+ * <b>路线 A：native</b>（`coding/native-jni/lib/mpc4j-native-fhe.dll` + 真 SEAL 4.0.0）。
+ *
+ * <p>为什么还没搬：native 侧现在只有<b>协议级</b>接口（keyGen/generateQuery/generateReply/…），
+ * <b>没有原语级接口，也没有任何 RGSW 实现</b>。要让 RGSW 也走 native，必须先给那个 DLL
+ * 增加一层原语级 JNI（含 RGSW/外部乘积/CMUX）。在那之前，本文件的价值是：
+ * <b>RGSW 逻辑的正确实现 + 测试基准</b>（自检 5/5 全绿），迁到 native 时按同样的算法照搬。
+ *
+ * <p>与 `com.fusepir.rlwe`（自研 RLWE，路线 C）的关系：自研那套已弃用，只作为交叉校验保留。
  * 理由：协议级运算（CtCtMul / 重线性化含缩放回落 / 槽位打包 / 旋转 / 序列化）MPC4J 都是现成且成熟的，
  * 自研那套要补齐这些需要几百行高难度代码（实测已经卡在"缩放回落"上）。
  *

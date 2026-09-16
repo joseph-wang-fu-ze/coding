@@ -12,20 +12,21 @@ $javacPath = (Get-Command javac -ErrorAction SilentlyContinue).Source
 if (-not $javacPath) { $javacPath = 'D:\Java\jdk\bin\javac.exe' }
 $javaPath = Join-Path (Split-Path -Parent $javacPath) 'java.exe'
 
-# dependencies: rlwe-java (pure JDK) + MPC4J seal classes + its jars
+# dependencies: rlwe-java (pure JDK) + MPC4J. Both come from inside coding\:
+# rlwe-java builds its own jar, and MPC4J ships prebuilt in coding\lib.
 $rlweOut = Join-Path $coding 'rlwe-java\out'
 if (-not (Test-Path $rlweOut)) {
     Write-Host "[prep] building rlwe-java first"
     Push-Location (Join-Path $coding 'rlwe-java'); & .\run.ps1 jar | Out-Null; Pop-Location
 }
-$mpc4jClasses = Join-Path (Split-Path -Parent $coding) 'cape_test\classes'
-$cpFile = Join-Path (Split-Path -Parent $coding) 'cape_test\cp.txt'
-if (-not (Test-Path $mpc4jClasses)) {
-    Write-Error "MPC4J classes not found at $mpc4jClasses (build cape_test first)"
+$lib = Join-Path $coding 'lib'
+$mpc4jJar = Join-Path $lib 'mpc4j-crypto-fhe-seal.jar'
+if (-not (Test-Path $mpc4jJar)) {
+    Write-Error "MPC4J jar not found at $mpc4jJar (coding\lib is missing)"
     exit 1
 }
-$jars = if (Test-Path $cpFile) { (Get-Content $cpFile -Raw).Trim() } else { '' }
-$cp = "$rlweOut;$mpc4jClasses;$jars"
+$jars = @($mpc4jJar) + @(Get-ChildItem (Join-Path $lib 'deps') -Filter *.jar | ForEach-Object { $_.FullName })
+$cp = "$rlweOut;$($jars -join ';')"
 
 $out = Join-Path $here 'out'
 if (Test-Path $out) { Remove-Item -Recurse -Force $out }

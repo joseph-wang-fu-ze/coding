@@ -198,6 +198,38 @@ RingParams.paperParams(16384, 15)   // t=65537、base=2^16、15 素数 ≈ 451 �
 
 ---
 
+### 4.5 MPC4J 的 RLWE 能力边界（2026-09-16 实测）
+
+RLWE 层现在直接用 MPC4J（`coding/lib` 里的 SEAL 4.0.0 Java 移植）。CAPE 在 RLWE 层需要的
+四件事**逐项跑过、逐项核对结果**（探针 `rgsw-lab/src/main/java/com/fusepir/rgsw/Mpc4jCapability.java`，
+N=4096、t=65537、3 素数、q=109 位）：
+
+| 能力 | 对应 CAPE 子程序 | 实测 | 数字 |
+|---|---|---|---|
+| 槽打包 `BatchEncoder` | Pack / 2-D 布局 | ✅ 4096 槽加解密往返 0 错位 | — |
+| 密文×密文 + 重线性化 | CtCtMul | ✅ 逐槽乘积 0/4096 错位 | 85 ms + 25 ms，规模 3 → 2 |
+| 槽旋转 `rotateRows` | CtRotate | ✅ 实测方向 = 槽下标 +1 | 14 ms（密钥生成 29 ms） |
+| 模数切换 | LWE(q=2N) ↔ RLWE 的桥、响应压缩 | ✅ 切换后仍正确解密 | 3 → 2 素数 |
+
+**三条硬边界，必须按它设计参数：**
+
+1. **到不了论文的 N=16384 + 438 位**。MPC4J 的 `AbstractGaloisTool` **每层模数**分配 N² 个 int：
+   N=16384、9 素数 ≈ 9 GB，必然 OOM。实测可用区间是 **N ≤ 8192 且素数 ≤ 3**
+   （本次 N=4096 + 3 素数 ≈ 201 MB，正常）。
+2. **噪声余量很浅，这才是真正的限制**（N=4096 / 109 位）：
+   - 密文×密文之后只剩 **24 bit**；
+   - 模数切换一次从 **51 → 12 bit**（掉约 39 bit，符合 log2(q/q′) 的预期）。
+   所以 CAPE 的电路深度必须按这个预算设计——这也解释了为什么 CAPE 以**密文×明文**为主、
+   只在必要处用 cmux（每次 cmux = 1 次外部乘积）。
+3. **模数切换不能在 NTT 形式下做**：BFV + NTT 会直接抛
+   `BFV encrypted cannot be in NTT form`，必须先在系数域再做。
+
+**MPC4J 没有的（必须我们自己写，已在 `rgsw-lab`）**：RGSW.Enc、外部乘积/CMUX、BlindRotate、
+SampleExtract，以及整层 LWE（`coding/lwe-java`）。MPC4J 的 FHE 只有 `mpc4j-crypto-fhe-seal`
+一个模块（就是 SEAL 的移植），没有 TFHE / RGSW / LWE 实现。
+
+---
+
 ## 五、RGSW 层（`coding/rgsw-lab/`）
 
 ### 5.1 核心 API

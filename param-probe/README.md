@@ -8,13 +8,15 @@
 ## 怎么运行
 
 ```powershell
+# MPC4J + SEAL 现在随仓库提供，就在 coding\lib 里，不再依赖 cape_test
 $jdk = 'D:\Java\jdk\bin'
-$cp  = (Get-Content 'E:\学习\密码赛\cape_test\cp.txt' -Raw).Trim()
-$full = "E:\学习\密码赛\cape_test\classes;$cp"     # 复用 9/15 已编译好的同态库
+$lib = (Resolve-Path '..\lib').Path
+$cp  = (Join-Path $lib 'mpc4j-crypto-fhe-seal.jar') + ';' +
+       ((Get-ChildItem (Join-Path $lib 'deps') -Filter *.jar | ForEach-Object { $_.FullName }) -join ';')
 
 $src = Get-ChildItem -Path .\src -Recurse -Filter *.java | ForEach-Object { $_.FullName }
-& "$jdk\javac.exe" -encoding UTF-8 -cp $full -d out $src
-& "$jdk\java.exe" -Xmx8g -cp "out;$full" com.fusepir.probe.ParamProbe
+& "$jdk\javac.exe" -encoding UTF-8 -cp $cp -d out $src
+& "$jdk\java.exe" -Xmx8g -cp "out;$cp" com.fusepir.probe.ParamProbe
 ```
 
 必须加 `-Xmx8g`（或更大），否则大 N 的实验会因为堆不够而提前失败。

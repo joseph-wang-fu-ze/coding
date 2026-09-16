@@ -1,10 +1,16 @@
 # ============================================================================
-#  Run the RGSW-on-MPC4J self-test using coding/lib (no external paths).
+#  Compile and run the MPC4J-based sources in this lab, using ONLY coding/lib.
 #  (ASCII only: Windows PowerShell 5.1 reads .ps1 as ANSI/GBK without a BOM)
 #
-#  Usage:  .\run-mpc4j.ps1
+#  Usage:  .\run-mpc4j.ps1                                  -> Mpc4jRgsw self-test
+#          .\run-mpc4j.ps1 -Class com.fusepir.rgsw.Mpc4jCapability
 # ============================================================================
+param([string]$Class = 'com.fusepir.rgsw.Mpc4jRgsw')
+
 $ErrorActionPreference = 'Stop'
+# Java writes UTF-8; make PowerShell decode child output as UTF-8, otherwise the
+# Chinese messages come back as GBK mojibake (and get truncated mid-stream).
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $here = Split-Path -Parent $MyInvocation.MyCommand.Definition
 $lib  = Join-Path (Split-Path -Parent $here) 'lib'
 $javacPath = (Get-Command javac -ErrorAction SilentlyContinue).Source
@@ -18,10 +24,17 @@ $out = Join-Path $here 'mpc4j-out'
 if (Test-Path $out) { Remove-Item -Recurse -Force $out }
 New-Item -ItemType Directory -Force -Path $out | Out-Null
 
-Write-Host "[compile] Mpc4jRgsw.java (classpath = coding\lib)"
-& $javacPath -encoding UTF-8 -cp $cp -d $out (Join-Path $here 'src\main\java\com\fusepir\rgsw\Mpc4jRgsw.java')
+# Only the sources that depend on MPC4J. The other files in this package belong
+# to the self-built RGSW/rlwe-java path and must NOT be pulled in here.
+$srcDir = Join-Path $here 'src\main\java\com\fusepir\rgsw'
+$srcFiles = @('Mpc4jRgsw.java', 'Mpc4jCapability.java') |
+    ForEach-Object { Join-Path $srcDir $_ } |
+    Where-Object { Test-Path $_ }
+
+Write-Host "[compile] MPC4J-based sources (classpath = coding\lib)"
+& $javacPath -encoding UTF-8 -cp $cp -d $out $srcFiles
 if ($LASTEXITCODE -ne 0) { Write-Error 'compile failed'; exit $LASTEXITCODE }
 
-Write-Host "[run] com.fusepir.rgsw.Mpc4jRgsw"
-& $javaPath '-Xmx4g' '-Dfile.encoding=UTF-8' -cp "$out;$cp" com.fusepir.rgsw.Mpc4jRgsw
+Write-Host "[run] $Class"
+& $javaPath '-Xmx4g' '-Dfile.encoding=UTF-8' -cp "$out;$cp" $Class
 exit $LASTEXITCODE

@@ -1,0 +1,2896 @@
+===== PAGE 1 =====
+[LEFT]
+Private Information Retriev
+Pranav Shriram Arunachalaram
+Abstract—Privateinformationretrieval(PIR)isafundamental
+primitiveforprotectinguserprivacy.Itenablesausertoretrieve
+entries from a public database without revealing which entries
+are being retrieved. PIR has been studied in many settings,
+e.g., with information-theoretic or computational security, with
+a single server or multiple non-colluding servers, and with or
+withoutpreprocessingtothedatabase.Inthisarticle,wedescribe
+several PIR schemes that we believe are accessible to readers
+without prior knowledge in PIR. Although conceptually simple,
+these schemes capture the main ideas underlying mainstream
+design paradigms. We also describe extensions of PIR that
+support keyword queries and batch queries. Beyond describing
+the schemes themselves, we characterize the concrete efficiency
+of different PIR paradigms, provide guidance on selecting a
+paradigm in practice, and discuss practical applications of PIR.
+We hope this article helps readers understand the current
+research landscape in PIR and serves as a starting point for
+exploring more advanced topics in the field.
+Index Terms—Private information retrieval, PIR, privacy-
+preservingapplications,homomorphicencryption,PIRwithpre-
+processing, stateful PIR, keyword PIR, batch PIR
+I. INTRODUCTION
+Can a user Alice read an article on a news website without
+exposingwhicharticlesheisreading?Inthiscase,thecontent
+ofthearticleispublic,butAlice’schoiceofarticlemayreveal
+sensitive information about her personal interests, political
+leanings, health conditions, professional activities, and so
+on. Alice would therefore prefer that no one, neither the
+news website nor any observer in the network, learn which
+article she accessed. This example highlights a fundamental
+privacychallenge:canauserobtainpublicinformationwithout
+revealing what information one seeks?
+Private Information Retrieval (PIR) [1] is a cryptographic
+primitivethatsolvesthisexactproblem.PIRallowsusers(also
+called clients) to retrieve entries from a public database 1
+hosted on the server without revealing any information about
+which entries are retrieved.
+As one of the most fundamental cryptographic primitives
+for privacy protection, PIR has been deployed or suggested
+for a variety of applications besides the above example of
+reading news articles. Apple has deployed PIR in its Live
+CallerIDLookupandURLfilteringfeatures[2].PIRhasalso
+beensuggestedforapplicationssuchasanonymouscommuni-
+cation[3]–[5],passwordbreachalerting[6],[7],secureadver-
+tising [8]–[10], and privacy-preserving media streaming [11].
+We describe several of these applications in more detail in
+Section XI.
+All three authors are with the Siebel School of Computing and Data
+Science, University of Illinois Urbana-Champaign, Urbana, IL 61801, USA.
+Emails:{psa3,yuec12,renling}@illinois.edu.
+1ThetermdatabaseinthecontextofPIRsimplyreferstoasetofgeneric
+data entries. It does not refer to organized information or its management
+system,suchasrelationalorSQLdatabases.
+[RIGHT]
+1
+val: A Tutorial and Survey
+manan, Yue Chen, and Ling Ren
+PIR schemes have been studied in various models and can
+beclassifiedbasedonthemodelingchoices.Weconsiderthree
+major aspects of the model.
+• Number of servers. The client can interact with a single
+serverormultiplenon-colludingservers.Havingmultiple
+non-colluding servers is a strong trust assumption, but it
+can decrease the cost of PIR, sometimes dramatically.
+• Computational assumptions. The PIR scheme can be
+eitherinformation-theoreticallysecureorcomputationally
+secure.AcomputationallysecurePIR,asiscustomaryin
+cryptography, relies on some cryptographic assumptions,
+i.e.,theadversaryiscomputationallyboundedandunable
+to solve some computational problem. In some settings,
+cryptographicassumptionsarenecessaryforPIR;inother
+settings, they can substantially reduce the cost of PIR.
+• Preprocessing. Either the server(s) or the client can
+perform preprocessing on the database. Preprocessing
+the database can speed up subsequent PIR invocations;
+however, the preprocessing step itself can be expensive
+and may impose significant changes and constraints on
+the system design and deployment model.
+Based on the combination of the above aspects of the
+model, different design paradigms for PIR have emerged. In
+this article, we present five conceptually simple schemes that
+reflect the key design principles and techniques in different
+paradigms. We also briefly review the literature in each set-
+ting. We hope that this article helps readers develop a basic
+understandingofmainstreamPIRdesignparadigmsandserves
+as a starting point for exploring more advanced PIR schemes.
+WestartwithPIRwithout preprocessing,whichisthemore
+standard and better studied setting. (In this article, a PIR
+scheme refers to one without preprocessing by default. PIR
+schemes with preprocessing will be explicitly stated as such.)
+We describe three simple and representative PIR schemes:
+• Atwo-serverinformation-theoreticPIRschemeusingjust
+bitwise XORs (Section III);
+• A two-server computational PIR scheme based on Dis-
+tributed Point Functions (DPF) (Section IV); and
+• A single-server computational PIR scheme based on
+homomorphic encryption (Section V).
+For the last combination of a single server and information-
+theoretic security (without preprocessing), no interesting
+scheme exists as the trivial scheme of downloading the entire
+database is optimal [1].
+All PIR schemes without preprocessing must incur server
+computationcostslinearinthedatabasesize.Preprocessingthe
+database by either the servers or the clients can circumvent
+the linear server computation bottleneck. Existing server-
+preprocessing PIR schemes with sublinear server computation
+===== PAGE 2 =====
+[LEFT]
+require advanced techniques and are beyond the scope of this
+article. Thus, we describe:
+• A single-server server-preprocessing PIR scheme with
+linear but improved server computation (Section VI).
+• A two-server client-preprocessing PIR scheme with sub-
+linear server computation (Section VII).
+In the original formulation of PIR (with or without pre-
+processing), the entries in the database are identified by
+consecutive integers. The schemes in Sections III to VII all
+fallintothiscategory.However,inmostpracticalapplications,
+including the ones mentioned at the beginning of the article,
+the database entries are instead identified by keywords or
+arbitrary strings. This variant of PIR is called keyword PIR.
+AnotherusefulvariantofPIRisbatchPIR,inwhichtheclient
+retrieves multiple entries from the server’s database at a time.
+We discuss these two variants of PIR and describe simple
+schemes for them in Section VIII and Section IX.
+We also briefly explain PIR’s connections to other cryp-
+tographic primitives in Section II-D, characterize the practi-
+cal performance of different paradigms of PIR, and provide
+guidelinesforselectinganappropriateparadigminpracticein
+Section X.
+II. PRIVATEINFORMATIONRETRIEVAL
+A. Problem Definition and Interface
+Private Information Retrieval (PIR) is a protocol between a
+client and one or more servers. It allows the client to retrieve
+an entry from a public database hosted on the server(s),
+without revealing to the server(s) which entry is retrieved.
+The database DB consists of N entries. Theoretical explo-
+rations of PIR often focus on the simplest case where each
+entry is a single bit. In this article, we consider the more
+general and practical setting with an arbitrary entry size of
+w bits. In most of this article, we assume the N entries are
+indexed by integers from 1 to N. Section VIII will deal with
+a database whose entries are indexed by arbitrary keywords
+instead of consecutive integers.
+The database is public. Many clients, potentially anyone
+with an Internet connection to the server(s), can interact with
+the server(s) to retrieve their respective desired entries from
+the same database. Each server stores a single copy of the
+database (possibly preprocessed) regardless of the number of
+clients it interacts with over time.
+Theinteractionbetweentheclientandtheserverinasingle-
+server PIR scheme is shown in Figure 1. The client has an
+entry of interest that it wishes to retrieve. Let x denote the
+indexoftheclient’sdesiredentry,alsocalledthedesiredindex
+for short. Given the desired index x, the client constructs a
+queryqandsendsqtotheserver.Fromtheclient’squeryqand
+the database DB, the server computes a response r and sends
+r to the client. Finally, using the server response r, the client
+computes an answer, which should be equal to the desired
+entry DB[x].
+In a multi-server PIR scheme, the client’s query consists of
+multiple components, one component per server. Each server
+computes a response and sends it to the client. The client
+computes the answer using all the responses.
+[RIGHT]
+2
+Client Server
+Input: x, the desired index Input: DB, the database
+Construct query q for x
+q
+Compute response r for q
+r
+Compute answer using r
+Fig. 1. The interaction between the client and the server in a single-server
+PIRprotocol.
+TABLEI
+COMMONNOTATIONS
+Symbol Meaning
+[a] Theset{1,2,...,a}
+DB Thedatabase
+N NumberofentriesinDB
+w Entrysizeinbits
+x Indexorkeywordoftheclient’sdesiredentry
+q Client’squery
+r Server’sresponse
+⊕ BitwiseXOR
+⟨·,·⟩ Innerproduct
+Common notations used in this article are summarized in
+Table I.
+B. Correctness and Privacy
+APIRschememustsatisfycorrectnessandprivacy,defined
+as follows:
+• Correctness: The answer computed by the client in the
+end equals the desired entry.
+• Privacy: Informally, the server learns no information
+about the client’s desired index from the client’s query.
+In this article, we assume the server(s) are honest but
+curious, i.e., the server(s) faithfully execute the steps of the
+PIR scheme but may attempt to infer a client’s desired index
+by analyzing the client’s query. In the single-server setting,
+the server sees everything that an adversary in the network
+sees. In the multi-server setting, it is further assumed that
+the servers do not collude with one another. There is also
+an implicit assumption that no adversary in the network can
+see the client’s query to more than one server. Thus, in either
+setting, we can treat the server(s) as the only adversary.
+We also note that the PIR problem is not concerned with
+theserver’sprivacy.Inparticular,theclientisallowedtolearn
+information about the other entries in the database. This is
+again because the entire database on the server is assumed to
+be public. There are cryptographic primitives that do worry
+about the server’s privacy. We will briefly contrast them with
+PIR in Section II-D.
+Wenowmakethedefinitionofprivacymoreformal.LetX
+betherandomvariablerepresentingtheclient’sdesiredindex.
+X follows some arbitrary distribution. Let Q be the random
+i
+variable representing the client’s query to the i-th server. For
+an information-theoretic PIR scheme, the distribution of X
+===== PAGE 3 =====
+[LEFT]
+conditioned on any server’s observed query must be the same
+as the a priori distribution of X. That is, for each server i and
+every index x∈[N],
+Pr[X =x|Q =q ]=Pr[X =x].
+i i
+Thiscapturestheintuitionthattheclient’squerytoeachserver
+doesnotleakanyinformationabouttheclient’sdesiredindex.
+For computational PIR, it is more convenient to think of
+PIR privacy as a game between the client and the server(s),
+analogous to the indistinguishability game in encryption. The
+game is defined as follows for single-server PIR.
+1) The server selects two indices x and x and sends them
+0 1
+to the client.
+2) The client flips a random coin b and executes the PIR
+protocol using x as the desired index.
+b
+3) Based on the client’s query, the server tries to guess b.
+Intuitively, if the servercannot guess b with better accuracy
+than a random guess, then the server did not learn any
+information from the client’s query, and we say the client
+winsthegame.Moreformally,ifnocomputationallybounded
+server can correctly guess b with a probability better than
+0.5 + ϵ where ϵ is negligible (in some security parameter),
+then the PIR scheme satisfies computational privacy.
+In the case of multi-server schemes, each server plays the
+game with the client and tries to guess b based on the client’s
+query to it. The scheme satisfies privacy if the client wins the
+indistinguishability game with each server.
+C. Efficiency Metrics
+ThemainefficiencymetricsforPIR(withoutpreprocessing)
+are the communication and server computation costs.
+• Communication:theamountofdata(typicallymeasured
+in bits) exchanged between the client and the server(s).
+Since there is a large gap between upload and download
+speedsinmodernInternet,itishelpfultobreakdownthe
+communication cost into query size and response size.
+• Server computation: the amount of computation per-
+formed by the server(s) to compute the response.
+Although the client also performs some computation to
+constructthequeryandcomputetheanswer,itisusuallymuch
+less than the server computation and hence not a focus in PIR
+schemes without preprocessing. When we later move to PIR
+schemes with preprocessing, client computation and storage
+costs(ofeitherclientsorservers)becomeadditionalimportant
+efficiency metrics.
+A trivial scheme. A trivial PIR scheme is for the server
+to send the entire database to the client. It is easy to see
+that the trivial scheme achieves correctness and privacy, and
+has O(Nw) communication cost (response size to be more
+precise).WeareinterestedinnontrivialPIRschemesthathave
+communication sublinear in N.
+D. Connections to Other Cryptographic Primitives
+We briefly summarize the connections of PIR to other
+fundamentalcryptographicprimitives.Readersunfamiliarwith
+[RIGHT]
+3
+these cryptographic primitives can skip this subsection and
+proceed with the rest of the article without difficulty.
+PIR vs. computational security and one-way functions.
+Multi-server PIR schemes with information-theoretic privacy
+and sublinear in N communication exist, as we will soon see
+inSectionIII.However,anontrivialsingle-serverPIRscheme,
+i.e., one whose communication cost is less than the database
+size, can only achieve computational privacy [1].
+A nontrivial single-server PIR scheme implies one-way
+functions [12], oblivious transfer (OT) [13], and collision-
+resistant hash functions [14]. Because OT and collision-
+resistant hash functions are believed to be stronger primitives
+thanone-wayfunctions2,itisunlikelytoconstructanontrivial
+single-server PIR scheme from one-way functions alone. In-
+deed,themainstreamapproachtosingle-serverPIR,including
+the scheme described in Section V of this article, relies on
+homomorphic encryption.
+PIR vs. Oblivious Transfer. PIR and OT [17] share some
+similarities,butalsohavecrucialdifferences.Itmaybehelpful
+to contrast the two. A 1-out-of-N OT is a protocol between
+twoparties:asenderholdingN entriesx ,x ,x ,...,x and
+1 2 3 N
+a receiver with an index i ∈ [N]. At the end of the protocol,
+thereceiverobtainsx withoutrevealinganyinformationabout
+i
+i to the sender and without learning anything about the other
+entries held by the sender.
+The OT sender resembles the server in PIR, and the OT
+receiver resembles the PIR client. Compared with PIR, OT
+additionally requires sender (server) privacy: the receiver is
+not allowed to learn anything about the sender’s other entries.
+As mentioned, any nontrivial single-server PIR scheme can
+be transformed into an OT scheme [13]. But most PIR
+schemes in their original forms, including the trivial scheme
+of downloading the whole database, are not solutions to OT
+because they do not provide server (sender) privacy. This also
+means OT with O(N) communication can still be interesting,
+but PIR with O(N) communication is usually not.
+PIR vs. Private Set Intersection. Private set intersection
+(PSI)[18],[19]isaprotocolbetweentheclientandtheserver,
+where the client has a set of elements C = {c ,c ,...,c }
+1 2 M
+and the server has a set of elements S = {s ,s ,...,s }.
+1 2 N
+At the end of the protocol, the client retrieves the elements
+in the intersection C ∩ S without learning any additional
+information about S, and the server learns no information
+about the elements in C.
+Notice that if we let the client perform a batch keyword
+PIR (see Section IX) with C as its batch and S as the
+server’s database, the client obtains the intersection C ∩ S
+without revealing any information to the server. However, PSI
+additionally requires server privacy. Additional techniques are
+required to transform a batch keyword PIR into PSI [20].
+PIR vs. Oblivious RAM. Oblivious RAM (ORAM) [21] is
+the other main cryptographic primitive that hides which entry
+is accessed. An ORAM scheme allows a client to outsource
+its private database to a remote server. The client can then
+2Infact,theyprovablycannotbeconstructedfromone-wayfunctionsina
+black-boxmanner[15],[16].
+===== PAGE 4 =====
+[LEFT]
+access any database entry without revealing to the server any
+information about which entry is accessed.
+The key difference between PIR and ORAM is that PIR
+considers a public database, whereas ORAM deals with a
+client’s private database. The database in PIR is public in
+the sense that many clients, possibly anyone on the Internet,
+can retrieve entries from it. The server stores a single copy
+of the database regardless of how many clients it interacts
+with. In contrast, in ORAM, a client’s database is encrypted
+by that client and is not accessible to any other client. If
+an ORAM server supports multiple clients, it must allocate
+a separate storage space for each client. In return, ORAM
+can easily achieve amortized polylogarithmic complexity in
+N forbothcommunicationandservercomputationwithsmall
+constants[22],whereasthisremainsamajoropenproblemfor
+PIR.
+E. A Basic Recipe
+A very simple structure underlies the three PIR schemes in
+SectionsIIItoVIinthisarticle.LetDBbeadatabasewithN
+entries, indexed by integers in [N] = {1,2,3,...,N}. Given
+a desired index x ∈ [N], let q be the one-hot encoding of x,
+that is, for all i∈[N],
+(cid:40)
+0, i̸=x
+q[i]= (1)
+1, i=x
+Then,DB[x]canbewrittenasaninnerproductbetweenqand
+the database DB, defined as follows:
+N
+(cid:88)
+DB[x]=⟨q,DB⟩= q[i]·DB[i]
+i=1
+where · represents multiplication (by either 0 or 1) and the
+(cid:80)
+summation in can be either addition or bitwise XOR.
+Looking ahead, the inner products use bitwise XORs in
+Sections III and IV, and use additions in Sections V and VI.
+Obviously,theclientcannotsendtheone-hotvectorqtothe
+server(s) due to the privacy requirement of PIR. From here, a
+naturalideaistosendqinaformthatis“protected”bycryp-
+tography and still permits the above inner product operations.
+Commoncryptographictoolsforthispurposeincludeadditive
+secretsharing(whentherearemultiplenon-colludingservers)
+and homomorphic encryption (when there is a single server).
+Thisbasicrecipe,combinedwiththeappropriatecryptographic
+tools, leads to the schemes in Sections III to VI.
+III. TWO-SERVERINFORMATION-THEORETICPIR
+In this section, we describe the first and simplest PIR
+schemes from the work of Chor et al. [1]. The schemes are
+information-theoretic and require two non-colluding servers.
+A. A Strawman Scheme
+We start with a simple strawman scheme. The two servers,
+denoted by S and S , each hold a copy of the database DB.
+1 2
+Theclientwishestoretrievethex-thentryofDB.Ifpreferred,
+the reader can think of each entry of DB to be a single bit for
+[RIGHT]
+4
+simplicity, although the scheme as presented will support an
+arbitrary entry size.
+Recall the basic recipe in Section II-E. In this strawman
+scheme,theclientsendstheone-hotvectorqtothetwoservers
+in a secret-shared form. The client picks a uniformly random
+binary vector q of length N. Every coordinate in q is either
+1 1
+0 or 1 with a half-half probability. Then, the client constructs
+q as follows:
+2
+(cid:40)
+q [i], i̸=x
+q [i]= 1
+2
+1−q [i], i=x
+1
+In other words, q is identical to q except that the bit at the
+2 1
+desired index x is flipped. Observe that q and q are XOR
+1 2
+shares of the one-hot vector q, i.e., the bitwise XOR of q
+1
+and q gives q:
+2
+q ⊕q =q.
+1 2
+The client sends q to server S and q to server S . Each
+1 1 2 2
+server computes its response by taking the inner product
+between the query and the database. That is,
+N
+(cid:77)
+r =⟨q ,DB⟩= q [i]·DB[i],
+1 1 1
+i=1
+N
+(cid:77)
+r =⟨q ,DB⟩= q [i]·DB[i].
+2 2 2
+i=1
+Finally, the client computes the answer by XORing r and r .
+1 2
+The pseudocode is given in Algorithm 1 and an illustration is
+shown in Figure 2.
+Correctness. Observe that for all i̸=x, q [i]=q [i]. Thus,
+1 2
+when the client computes r ⊕r , all those database entries
+1 2
+cancel out. The only term that remains is exactly DB[x] since
+q [x]⊕q [x]=1. In more detail,
+1 2
+N N
+(cid:77) (cid:77)
+r ⊕r = (q [i]·DB[i])⊕ (q [i]·DB[i])
+1 2 1 2
+i=1 i=1
+N
+(cid:77)
+= (q [i]·DB[i])⊕(q [i]·DB[i]) (2)
+1 2
+i=1
+N
+(cid:77)
+= (q [i]⊕q [i])·DB[i] (3)
+1 2
+i=1
+N
+(cid:77)
+= q[i]·DB[i] (4)
+i=1
+=DB[x]
+BecauseXORiscommutativeandassociative,wegetEqua-
+tion (2) by rearranging terms. We get Equation (3) because
+AND (which is equivalent to multiplication by a single bit)
+distributes over XOR. We get Equation (4) since q and q
+1 2
+are XOR shares of q.
+Privacy. We show the scheme satisfies the privacy definition
+in Section II. Let X be the distribution of the client’s desired
+index.LetQ andQ betherandomvariablesrepresentingthe
+1 2
+client’squeriestothetwoservers,respectively.Eachbitinthe
+===== PAGE 5 =====
+[LEFT]
+Server 1
+Client
+Server 2
+Fig.2. Anillustrationofthestrawmantwo-serverinformation
+Client
+Input: x, the desired index
+q ←a vector of N random bits
+1
+q ←q
+2 1
+q [x]←¬q [x]
+2 2
+q
+1
+−−−−−−−−−−−→
+−−−−−−−−−−−−−−
+r
+1
+←−−−−−−−−−−−
+←−−−−−−−−−−−−−
+Return r ⊕r
+1 2
+Algorithm 1. Astrawmantwo-serverinformation-theore
+Client
+Input: x, the desired index
+(cid:108) √ (cid:109)
+x′ ← x/ N // DB[x]∈DB′
+x′
+x′
+Algorithm 1
+a
+√
+Return a[x−(x′−1) N]
+Algorithm 2. Two-serverinformation-theoreticPIRschemewith
+vector Q is sampled uniformly at random and independent
+1
+of the client’s desired index. Hence, we have
+Pr[X =x|Q =q ]=Pr[X =x].
+1 1
+Q is identical to Q except that its x-th bit is flipped. When
+2 1
+viewedindependentlyofQ ,Q isalsouniformlyrandomand
+1 2
+independent of the client’s desired index, i.e.,
+Pr[X =x|Q =q ]=Pr[X =x].
+2 2
+Thus, the scheme satisfies privacy.
+Efficiency. In this scheme, the client sends N bits to each
+server and receives a w-bit response from each server. The
+[RIGHT]
+5
+Client
+n-theoreticPIRscheme.
+Server S Server S
+1 2
+Input: DB, the database Input: DB, the database
+q
+2
+−−−−−−−−−−−−−−−−−−−−→
+N N
+(cid:77) (cid:77)
+r ← q [i]·DB[i] r ← q [i]·DB[i]
+1 1 2 2
+i=1 i=1
+r
+2
+−−−−−−−−−−−−−−−−−−−−−−
+eticPIRscheme.
+Servers S and S
+1 2
+Input: DB, the database
+√
+Reinterpret DB as DB′ where ∀i∈[ N]
+(cid:16) √ √ (cid:17)
+DB′[i]← DB[(i−1) N +1],...,DB[i N]
+DB′
+√
+hO( N)communication.
+communication cost of the scheme is hence O(N +w). The
+server computation cost is O(Nw).
+WecallthissimpleschemeastrawmanbecauseofitsO(N)
+query size. Indeed, if the entries are small, e.g., w = O(1),
+theschemeisnobetterthanthetrivialschemeofdownloading
+the whole database. But if the entries are very large relative
+to N, e.g., w = Ω(N), then this “strawman” scheme can be
+competitive or even close to optimal, since fetching the entry
+ofinterestalone(withoutprivacy)needsO(w)communication
+and the O(N) query size is no longer the bottleneck.
+===== PAGE 6 =====
+[LEFT]
+B. Reducing the Query Size
+Building on the strawman scheme in Algorithm 1, Algo-
+rithm2isatwo-serverinformation-theoreticPIRschemewith
+√
+O( Nw) communication cost for a database DB with N
+entries.Theideaistoreinterpretthedatabaseashavingfewer
+but larger entries to balance the sizes of the query and the
+response.
+Both the client and the two servers can reinterpret DB as
+√ √
+a new database DB′ with N larger entries. The first N
+√
+entries of DB become DB′[1], the next N entries become
+DB′[2], and so on. The x-th entry in the original database DB
+(cid:108) (cid:109)
+is now part of the √x -th entry of DB′. The client and the
+N
+servers execute the strawman scheme in Algorithm 1 using
+(cid:108) (cid:109)
+x′ = √x andDB′.Attheendofthestrawmanscheme,the
+N
+client has DB′[x′] and easily recovers DB[x].
+The correctness and privacy of this scheme are straightfor-
+wardfromthecorrectnessandprivacyofthestrawmanscheme
+in Algorithm 1.
+Efficiency. Each server performs O(N) w-bit XOR opera-
+tions, so the server computation cost remains O(Nw). The
+√ √
+client sends N bits to each server and receives Nw
+bits from each server. Hence, the communication cost of
+√
+Algorithm 2 is O( Nw).
+The communication cost can be further improved to
+√
+O( Nw)bybalancingthequeryandresponsesizes.Theonly
+modification needed is to instead interpret DB′ as a database
+√ √
+with O( Nw) entries each of O( Nw) bits.
+C. A Brief Survey of Multi-server Information-theoretic PIR
+The line of work in this setting generally considers
+databases with single-bit entries and focuses on minimizing
+the query size. In the paper by Chor et al. that introduced
+PIR [1], the authors gave various schemes in the multi-server
+√
+information-theoretic setting. The two-server O( N) scheme
+in Algorithm 2 is one of them. They also give a two-server
+√
+scheme with O(3N) communication cost by leveraging cov-
+ering codes, as well as various schemes that use more than
+two servers.
+In the two-server sett√ing, the PIR scheme of Dvir and
+Gopi [23] achieves NO( loglogN/logN) communication. In
+the three-server setting, several works [24]–[26] achieve
+√
+2O( logN·loglogN) communication. In the k-server setting,
+the PIR scheme of Beimel et al. [27] achieves
+NO(lo
+k
+g
+lo
+lo
+g
+g
+k
+k)
+communication.
+IV. TWO-SERVERCOMPUTATIONALPIR
+In this section, we describe the two-server computational
+PIRschemefromGilboaandIshai[28].Theschemeleverages
+a cryptographic primitive called distributed point functions
+(DPF). Compared to the scheme in Section III, the DPF-
+based PIR scheme weakens the security from information-
+theoretic to computational; in return, it significantly improves
+the communication cost to depend logarithmically on N.
+[RIGHT]
+6
+A. Point Function and Distributed Point Function
+A point function is a function that outputs a non-zero value
+on one specific input, and outputs 0 on all other inputs. For
+the use case of PIR, we can assume, for simplicity, that the
+non-zero value is 1 and the domain is [N]. Formally, a point
+functionwithaparameterα∈[N]isf :[N]→{0,1}where
+α
+(cid:40)
+1, i=α
+f (i)=
+α
+0, i̸=α
+A Distributed Point Function (DPF), introduced by Gilboa
+and Ishai [28], can be thought of as a way to secret-share a
+point function f between two parties so that the parameter
+α
+α remains hidden. Concretely, a DPF is a pair of algorithms:
+• Gen(α,N) returns a pair of keys k 1 and k 2 ,
+• Eval(k,i) returns y ∈{0,1}.
+A DPF must satisfy the following correctness and privacy
+properties.
+• Correctness. With (k 1 ,k 2 ) ← Gen(α,N), Eval(k 1 ,i)
+and Eval(k ,i) are XOR secret shares of f (i), i.e., for
+2 α
+all i∈[N],
+Eval(k ,i)⊕Eval(k ,i)=f (i).
+1 2 α
+• Privacy. An individual key, k 1 or k 2 alone, leaks no
+information about the point function parameter α.
+At a high level, a DPF can be thought of as a more
+succinct way to secret-share a one-hot vector than the basic
+XOR secret sharing used in Section III. As such, a primary
+efficiency metric for DPF is the key size. The state-of-the-art
+DPFconstructionbyBoyleetal.[29]haskeysizeO(λlogN)
+where λ is a security parameter. We will not delve into the
+details of the DPF construction since the PIR scheme (also
+proposed in [28]) uses DPF in a black-box manner.
+B. The PIR Scheme
+The setting is the same as in Section III. The database DB
+consists of N entries, indexed by integers in [N]. The two
+serversS andS eachholdacopyofDB.Theclient’sdesired
+1 2
+index is x and wants to retrieve DB[x].
+The high-level idea of this scheme is also similar to that in
+Section III: the two servers will receive XOR secret shares of
+the one-hot vector q. But this time, we will rely on DPFs. In
+particular,observethatqcanbederivedfromapointfunction:
+for each i∈[N], q[i]=f (i).
+x
+ThePIRschemethenfollowsnaturally.Theclientcomputes
+(k ,k )←Gen(x,N)andsendsk toS andk toS .Using
+1 2 1 1 2 2
+k , the server S computes a vector q : for all i∈[N],
+1 1 1
+q [i]=Eval(k ,i).
+1 1
+Similarly, server S computes q using k : for all i∈[N],
+2 2 2
+q [i]=Eval(k ,i).
+2 2
+The correctness of the DPF ensures that q ⊕q = q. The
+1 2
+privacy of DPF ensures that each server, receiving a single
+key, learns no information about the desired index x.
+The rest of the PIR protocol is identical to the strawman
+scheme in Section III. Each server S computes its response
+ℓ
+===== PAGE 7 =====
+[LEFT]
+Server 1
+Client
+Server 2
+Fig.3. AnillustrationoftheDPF-basedtwo-servercomputatio
+Client Server S
+1
+Input: x, the desired index Input: DB
+(k ,k )←Gen(x,N)
+1 2
+k
+1
+−−−−−−−−−−−→
+k
+2
+−−−−−−−−−−−−−−−−−−−−−−−
+∀i∈[N],
+N
+(cid:77)
+r ← q
+1
+i=1
+r
+1
+←−−−−−−−−−−−
+r
+2
+←−−−−−−−−−−−−−−−−−−−−−
+Return r ⊕r
+1 2
+Algorithm 3. Two-servercomputationalPIRbasedonDPF.
+r =
+(cid:76)N
+q [i]·DB[i].Theclientcomputesr ⊕r asthean-
+ℓ i=1 ℓ 1 2
+swer. The pseudocode of the scheme is given in Algorithm 3.
+Efficiency. Using the state-of-the-art DPF [29], the two keys
+k and k are each O(λlogN) bits where λ is a security
+1 2
+parameter. Thus, the query size is O(λlogN), which is much
+smaller than the information-theoretic schemes presented and
+surveyed in Section III. The response is a single entry of
+w bits from each server. The server computation of [29]
+involvesO(N/λ)callstoapseudorandomfunction(PRF)and
+O(N) w-bit XORs. The former comes from calling the DPF
+Eval function on all indices simultaneously (using additional
+optimizations introduced in [29]) and the latter comes from
+computing the inner product.
+V. SINGLE-SERVERCOMPUTATIONALPIR
+Whilehavingmultiplenon-colludingserversmakesthePIR
+problem easier and enables more efficient solutions, it is a
+strong trust assumption and requires coordination from multi-
+ple organizations. Single-server PIR, though less efficient, is
+easier to deploy and has seen more adoption in practice [2].
+[RIGHT]
+7
+Same as Fig. 1
+Client
+onalPIRscheme.
+Server S
+2
+B, the database Input: DB, the database
+−−−−−−−−−−−−−−−−−−→
+q [i]=Eval(k ,i) ∀i∈[N], q [i]=Eval(k ,i)
+1 1 2 2
+N
+(cid:77)
+q [i]·DB[i] r ← q [i]·DB[i]
+1 2 2
+i=1
+−−−−−−−−−−−−−−−−−−−
+As discussed in Section II-D, single-server PIR likely re-
+quires cryptographic assumptions and primitives beyond one-
+way functions. State-of-the-art single-server PIR schemes [7],
+[30]–[33] leverage Somewhat Homomorphic Encryption
+(SHE). We describe below the interface of SHE and a single-
+server PIR scheme that uses SHE in a black-box manner.
+A. Somewhat Homomorphic Encryption
+A Somewhat Homomorphic Encryption (SHE) is an en-
+cryption scheme that supports a limited number of addition
+and multiplication operations on ciphertexts. Enc takes a
+plaintext m and outputs a ciphertext encrypting m. Dec takes
+a ciphertext and gives back the plaintext. Both the Enc and
+Dec functions take a secret key s. We use the tilde notation
+m to denote an encryption of m.
+(cid:58)
+CtAdd and CtMul are homomorphic operations on cipher-
+texts. They take two ciphertexts and output a ciphertext that
+encryptsthesumandproductofthetwounderlyingplaintexts,
+respectively. Lastly, PtCtMul takes a plaintext m and an
+1
+encryption of m as input, and outputs a ciphertext that
+2
+encrypts m ·m . We list PtCtMul separately because it is
+1 2
+===== PAGE 8 =====
+[LEFT]
+Client
+Input: x, the desired index
+q← a vector of N ciphertexts
+q[x]←Enc(s,1)
+q[i]←Enc(s,0) for all i̸=x
+q
+r
+Return Dec(s,r)
+Algorithm 4. Astrawmansingle-servercomput
+usually cheaper than CtMul. The interface of SHE is listed
+below.
+• Enc(s,m)→m
+(cid:58)
+• Dec(s,m)→m
+(cid:58)
+• CtAdd(m 1 ,m 2 )→m 1 +m 2
+(cid:58) (cid:58) (cid:58)
+• CtMul(m 1 ,m 2 )→m 1 ·m 2
+(cid:58) (cid:58) (cid:58)
+• PtCtMul(m 1 ,m 2 )→m 1 ·m 2
+(cid:58) (cid:58)
+The state-of-the-art constructions of SHE are based on
+lattice cryptography [34], [35]. Examples include BFV [36],
+[37], BGV [38], and CKKS [39], all of which are based
+on the Ring Learning with Errors (RLWE) problem. In lat-
+tice cryptography, each ciphertext carries some noise, and
+the homomorphic operations (CtAdd, CtMul, and PtCtMul)
+increase the noise in the output ciphertext. When the noise
+exceeds a certain level, the decryption procedure Dec can
+no longer recover the plaintext. This is why SHE can only
+supportalimitednumberofhomomorphicoperations.Instate-
+of-the-art SHE, homomorphic additions (CtAdd) increase the
+noiseslightly,whilehomomorphicmultiplications(CtMuland
+PtCtMul)increasethenoisesubstantially.Thus,SHEtypically
+delivers good practical efficiency only on computation tasks
+with small multiplicative depth.
+Forthereaders’reference,acryptographicprimitiveclosely
+relatedtoSHEisFullyHomomorphicEncryption(FHE)[40].
+FHE is a stronger primitive than SHE as it supports unlimited
+homomorphic additions and multiplications. Existing FHE
+constructions are also based on lattice cryptography and use
+noisyciphertexts.Infact,manyoftheaforementionedRLWE-
+based schemes can operate as FHE schemes. In order to
+support unlimited homomorphic operations, an FHE scheme
+mustperiodicallyrunaprocedurecalledbootstrapping,which
+“refreshes”theciphertextstoreducethenoiseinthembackto
+an acceptable level. The bootstrapping procedure is powerful
+but requires extremely expensive computation, making FHE
+orders of magnitude slower than SHE. As a result, practical
+single-server PIR schemes opt for SHE and need to find ways
+to control the multiplicative depth or noise growth.
+[RIGHT]
+8
+Server
+Input: DB, the database
+N
+(cid:88)
+r← PtCtMul(DB[i],q[i]),
+i=1
+where the summation uses CtAdd
+tationalPIRscheme.sistheclient’ssecretkey.
+B. A Strawman Scheme
+Westartwithastrawmansingle-serverPIRscheme.Itbuilds
+upon the basic recipe in Section II-E and is conceptually
+similar to the strawman two-serverscheme in Section III. The
+main idea is to send the one-hot query vector q after SHE
+encryption.
+The encrypted one-hot vector hides the position of 1 and
+(cid:58)
+the desired index x, as a SHE scheme ensures that 0 is
+(cid:58)
+indistinguishablefrom1.Itisimportanttonotethatallmodern
+(cid:58)
+encryption schemes, SHE schemes included, are randomized.
+Therefore, even though the encrypted vector contains many
+instances of 0, they all appear different and random, and are
+(cid:58)
+indistinguishable from the single 1 to the server.
+(cid:58)
+Theservercomputestheinnerproductbetweenthedatabase
+and the encrypted vector using homomorphic multiplications
+and additions, i.e., PtCtMul and CtAdd. The encrypted inner
+product result is sent back to the client as the response. The
+clientdecryptsandrecoversthedesiredentry.Thepseudocode
+is presented in Algorithm 4.
+Handling arbitrary database entry sizes. The use of SHE
+raises a new issue worth clarifying: a SHE scheme has a
+fixed plaintext space, but databases come in various entry
+sizes. Indeed, we have made a simplifying assumption in
+Algorithm 4 that each database entry fits in the SHE plaintext
+space. If each database entry is longer than one plaintext, the
+PtCtMulfunctionwouldneedtospliteachentryintomultiple
+chunks, just like what one would do when encrypting a long
+message. Each chunk fits in the plaintext space and multiplies
+with the ciphertext separately. The output also consists of
+multiple ciphertexts, each encrypting a portion of the result.
+Equivalently, we can think of the database as multiple
+(say k) smaller databases with plaintext-sized entries. Now,
+fetching DB[x] is equivalent to retrieving the x-th entry from
+eachofthesesmallerdatabases.Crucially,thedesiredindexx
+is the same for all k smaller databases. Thus, the client only
+needstosendonequery.Theservercanreusethequeryforall
+k smaller databases. The server sends all k responses back to
+the client. The client assembles the desired entry DB[x] from
+the k responses. Note that this transformation works for all
+===== PAGE 9 =====
+[LEFT]
+PIR schemes. For example, we could interpret the two-server
+schemesinAlgorithms1and3asapplyingthistransformation
+toextendabaseschemefor1-bitentriestoaschemeforlonger
+entries.
+Efficiency. The client sends N ciphertexts to the server.
+Assuming each entry fits in the plaintext space for simplicity,
+the server performs N PtCtMul and CtAdd operations and
+sends one ciphertext back to the client. Because a ciphertext
+is always larger than the underlying plaintext, uploading N
+ciphertexts is actually worse than downloading the entire
+database of N plaintext entries.
+If each entry is as large as k plaintexts, then the server
+computation and the response size both increase by a factor
+of k, but the query size remains N ciphertexts. The total
+communication cost becomes N +k ciphertexts, which can
+besignificantlybetterthandownloadingtheentiredatabaseof
+Nk plaintext entries, and even close to optimal if k =Θ(N).
+The server computation cost is O(Nk) homomorphic opera-
+tions, proportional to the database size.
+C. Reducing the Query Size with Recursion
+To improve communication, Algorithm 5 reduces the query
+√
+sizetoO( N)byrecursivelyexecutingthestrawmanscheme
+√
+twice, each time on a database with N entries.
+√
+To elaborate, the database is reinterpreted as having N
+√
+segments,eachcontaining N consecutiveentriesofDB.The
+√
+client sends two encrypted one-hot vectors of size O( N),
+corresponding to the selection of the desired segment, and the
+desired entry within that segment, respectively.
+The server uses the PtCtMul and CtAdd operations to
+perform the inner product homomorphically in the first di-
+mension. Here, each segment is treated as the plaintext input
+to PtCtMul. Note that a segment may be much larger than
+an SHE plaintext. As mentioned in Section V-B, internally,
+√
+PtCtMul can split a segment into N parts and perform
+multiplication separately on each part.
+The output of the first inner product is the encryption of
+the segment that contains the desired entry. It is treated as
+the intermediate database for the second dimension. For the
+second dimension, since the input database is encrypted, the
+server uses CtMul and CtAdd operations to perform the inner
+product homomorphically.
+Thecorrectnessandprivacyofthetwo-dimensionalscheme
+in Algorithm 5 are straightforward as before. The query size
+√
+is now O( N) and the response is a single encrypted entry.
+Assuming for simplicity that each entry fits in the SHE
+plaintext space, the server computation still involves O(N)
+homomorphic operations, as the first dimension still uses
+O(N) PtCtMul and CtAdd operations.
+Extension to d dimensions. The above two-dimensional
+scheme can be extended to d dimensions to further reduce the
+querysize.Theoriginaldatabaseisviewedasad-dimensional
+√
+hypercube, where the length in each dimension is dN. The
+PIR scheme can be thought of as a recursive one. The client’s
+query consists of d encrypted one-hot vectors, each of size
+√
+O(dN).Ateachrecursionlevel,theserverhomomorphically
+[RIGHT]
+9
+performs inner products along one dimension, “flattening” the
+hypercube along that dimension. A three-dimensional scheme
+is illustrated in Figure 4.
+Increasing the number of recursion levels d reduces the
+√
+communication cost to O(ddN) while keeping the server
+computationcostatO(N)homomorphicoperations.However,
+a larger d comes with a higher homomorphic multiplicative
+depth.AsmentionedinSectionV-A,itischallengingforSHE
+schemes to handle high multiplicative depths. More advanced
+SHEtechniquesareneededtosupportahighrecursionleveld
+(see the survey below for more details).
+D. A Brief Survey of Single-server Computational PIR
+Mostsingle-serverPIRschemesarebasedonhomomorphic
+encryptionandcanbeviewedasconcreteinstantiationsofthe
+recursive scheme presented in this section.
+Number-theory-based schemes. Kushilevitz and Ostro-
+vsky [41] present the first single-server PIR scheme. Their
+scheme uses the homomorphic property of the quadratic
+residue-based public-key encryption of Goldwasser and Mi-
+cali[42].Stern[43]givesanoblivioustransferscheme,which
+isstrongerthanPIR,basedonanyadditivelyhomomorphicen-
+cryption(AHE).Chang[44]andLipmaa[45]presentschemes
+with improved communication costs based on the Damga˚rd-
+Jurik [46] AHE.
+ItshouldbenotedthatAHE,asthenamesuggests,onlysup-
+ports the homomorphic ciphertext addition operation CtAdd,
+and does not support the ciphertext multiplication operation
+CtMul . But the above AHE-based PIR schemes can still
+be understood in the SHE-based template outlined in this
+section. First, note that AHE supports the PtCtMul operation:
+it can be implemented by invoking CtAdd repeatedly (using
+the repeated squaring algorithm). The CtMul operation can
+then be emulated like PtCtMul after interpreting one of the
+ciphertextsasaplaintext.Theserver’sresponseoftheseAHE-
+basedPIRschemeswouldbeaciphertextwithlayersofnested
+encryption.
+We are aware of two schemes that do not follow the
+homomorphic encryption approach [47], [48]. In particular,
+the scheme of Gentry and Ramzan [48] has the smallest
+communication cost among all single-server PIR schemes
+to our knowledge. Its communication cost can approach the
+insecure baseline (i.e., simply fetching the desired entry) on
+databases with reasonably large entries.
+The above schemes are all based on number-theoretic
+techniques. The server computation involves a large number
+of modular exponentiations and is hence very slow. For a
+moredetailedoverviewofsingle-serverPIRschemesbasedon
+number-theoretic techniques, we refer the reader to a survey
+by Ostrovsky and Skeith [49].
+Lattice-based schemes. More recent works [7], [30]–[33],
+[50]–[53] move away from number-theoretic techniques and
+instead use lattice-based (in particular, RLWE-based) SHE.
+Lattice-based SHE at low multiplicative depth offers much
+cheaperhomomorphicoperationsthannumber-theoreticAHE,
+thereby drastically speeding up server computation.
+===== PAGE 10 =====
+[LEFT]
+Client
+Input: x, the desired index
+(cid:108) √ (cid:109)
+x 1 ← x/ N // DB[x]∈DBx1
+√
+x 2 ←x−(x 1 −1) N √ // DB[x]=DBx1 [x2]
+q ,q ← two vectors of N ciphertexts
+1 2
+q [x ]←Enc(s,1)
+1 1
+q [i]←Enc(s,0), for all i̸=x
+1 1
+q [x ]←Enc(s,1)
+2 2
+q [i]←Enc(s,0), for all i̸=x
+2 2
+q ,q
+1 2
+r
+Return Dec(s,r)
+Algorithm 5. Single-Server PIR based on SHE and two levels of rec
+CtAdd.
+Client
+Plaintext
+Ciphertex
+Fig.4. Anillustrationforasingle-serverPIRschemewiththr
+The shift to lattice-based SHE also brings new challenges.
+First, a lattice ciphertext is very large (at least a few thou-
+sand bytes) even if the plaintext is small. This is especially
+wasteful for encrypting the bits in q one by one. Second,
+homomorphic multiplication introduces large noise, limiting
+the number of PIR recursion levels. As a result, the initial
+attempt [30] improves server computation but suffers from
+high communication cost.
+Various techniques have been invented or incorporated to
+address these two challenges. To address the first challenge,
+SealPIR [31] introduces query compression: the client can
+pack many bits in a single lattice ciphertext, and the server
+can unpack them into individual ciphertexts. This technique
+significantly reduces the query size. MulPIR [7] incorporates
+modulus switching [38], [54] to reduce response size. To
+addressthesecondchallenge,severalworks[32],[50],[51]in-
+[RIGHT]
+10
+Server
+Input: DB, the database
+(cid:16) √ √ (cid:17) √
+DB ← DB[(i−1) N +1],...,DB[i N] ,∀i∈[ N]
+i
+√
+N
+(cid:88)
+t← PtCtMul(DB ,q [i])
+i 1
+i=1
+√
+N
+(cid:88)
+r← CtMul(t[j],q [j])
+2
+j=1
+cursion. s is the client’s secret key. The additions in the summations use
+Result
+xts Ciphertexts
+reelevelsofrecursion.
+corporateaspeciallow-noisehomomorphicmultiplication[55]
+to implement the CtMul operation. This allows a higher
+recursion level d, resulting in smaller query and response
+sizes.Theseandadditionaltechniques,alongwithengineering
+efforts, help single-server PIR schemes eventually achieve
+reasonable practical efficiency.
+ItshouldbenotedthattheimplementationsofmostRLWE-
+based single-server PIR schemes [31]–[33], [52], [56] employ
+aformofserverpreprocessingtospeedupservercomputation
+duringthequery.Inparticular,theyperformNumber-Theoretic
+Transform(NTT)oneachplaintextdatabaseentryindividually
+in preparation for the PtCtMul operations. However, the core
+algorithms of these schemes follow the templates in Algo-
+rithms4and5anddonotrelyfundamentallyonpreprocessing.
+Thus, we treat them as PIR schemes without preprocessing
+and discuss them in this section. In contrast, the next section
+===== PAGE 11 =====
+[LEFT]
+discussesPIRschemeswhosedesignprinciplecriticallyrelies
+on server preprocessing.
+VI. SERVER-PREPROCESSINGPIR
+AllPIRschemes(withoutpreprocessing),includingthosein
+the previous sections, have server computation costs that are
+linear in the database size, since the server operates on every
+single database entry. This is a fundamental barrier because,
+intuitively, if a PIR scheme does not require the server to
+operate on a given entry, then the server learns that the client
+isnotretrievingthatentry,therebyviolatingPIRprivacy.This
+intuition was formalized by Beimel, Ishai, and Malkin [57].
+They proved the lower bound that Ω(N) server computation
+is necessary if the server stores only the unmodified database
+(and nothing else) and the client has no state.
+The above linear server computation lower bound can be
+circumvented by preprocessing the database. Note that any
+nontrivial PIR scheme (with or without preprocessing) must
+achieve sublinear communication (possibly in an amortized
+sense). Naturally, many PIR schemes that use preprocessing
+aim to make communication and server computation both
+sublinear in N, so they have also been called doubly-efficient
+PIR. But it is also important to note that not all PIR schemes
+withpreprocessingaimtobedoublyefficient.Inparticular,the
+scheme we present later in this section still has O(N) server
+computation, but with an improved constant factor.
+Iftheservercarriesoutthepreprocessingwithoutinvolving
+any client, then it is called server-preprocessing PIR. If
+preprocessingneedstobecarriedoutseparatelybyeachclient
+or for each client, it is called client-preprocessing PIR. For
+both paradigms, updates to the database pose new challenges,
+since they likely require redoing a significant portion, if not
+the entirety, of the preprocessing step. We discuss server-
+preprocessing PIR in the rest of this section and client-
+preprocessing PIR in the next section.
+In a server-preprocessing PIR scheme, the server prepro-
+cesses the original database in an offline phase and stores the
+preprocesseddatabasetorespondtoclientqueriesinanonline
+phase. The stored preprocessed database is inevitably larger
+than the original database.
+While there are a few doubly efficient server-preprocessing
+PIRschemesintheliterature[57],[58],theyrelyonadvanced
+tools and are beyond the scope of this article. Thus, in
+this section, we describe a single-server server-preprocessing
+PIR scheme whose online server computation is still O(N)
+but a constant factor cheaper than the schemes mentioned
+in Section V.
+A. Background on LWE and RLWE Encryptions
+As briefly mentioned in Section V, state-of-the-art single-
+server PIR schemes without preprocessing use Somewhat
+HomomorphicEncryption(SHE)basedonRingLearningwith
+Errors (RLWE) [35]–[37]. A more basic and less efficient
+variant of SHE is based on Learning with Errors (LWE) [34].
+Yet, a recent line of work on server-preprocessing PIR [59]–
+[62] uses LWE-based SHE. Their main observation is that
+LWE is more amenable to preprocessing. To understand the
+[RIGHT]
+11
+reasoninghere,weneedtodivealittledeeperintoLWE-based
+and RLWE-based SHE.
+In LWE encryption, a plaintext m is a scalar, and a
+ciphertext has the form m = (a,b), where a is a random
+(cid:58)
+vector and b is a scalar. Here, b=a·s+∆m+e, where the
+vector s is the secret key, e is a small random error, and ∆ is
+a scaling factor that places m in high-order bits. Decryption
+works by computing b − a · s and rounding to the nearest
+multiple of ∆ to remove the error e.
+In RLWE encryption, a plaintext m is a polynomial, and
+a ciphertext has the form m = (a,b) where a and b are
+(cid:58)
+both polynomials. Here, similarly to LWE, a is a random
+polynomial and b=a·s+∆m+e, where s is the secret key
+polynomial, e is a small random error polynomial, and ∆ is
+the scaling factor. Decryption works similarly by computing
+b−a·s and rounding to remove the error e.
+The vector length in LWE and the polynomial degree in
+RLWE are both denoted by n and typically range between
+512 and 4096 for PIR. The bit-length of the scalar in LWE
+and the polynomial coefficients in RLWE must be carefully
+chosen based on n.
+Computation efficiency comparison. Note that an LWE
+ciphertext is more than n times larger than its plaintext,
+whereas an RLWE ciphertext is only a constant factor larger
+than its plaintext. This makes an RLWE-based SHE much
+more efficient than an LWE-based one in terms of both com-
+munication and computation. The communication advantage
+stems from the constant ratio between the ciphertext and
+plaintext sizes. To understand the computational advantage of
+RLWE, let us examine the computation involved in PtCtMul,
+sincethatistheservercomputationbottleneckinAlgorithm5.
+With LWE,
+PtCtMul(m,x)=m·(a,b)=(m·a,m·b)
+(cid:58)
+requiresO(n)computationwherethebottleneckisthescaling
+of the vector a. With RLWE, the computation involves two
+polynomial multiplications:
+PtCtMul(m,x)=m·(a,b)=(m·a,m·b).
+(cid:58)
+If the RLWE ciphertext is kept in the Number-Theoretic
+Transform (NTT) form, the computation is also O(n). But
+notice that the underlying plaintext of an RLWE ciphertext
+is thousands of times bigger than that of an LWE ciphertext.
+In other words, while the computation cost of PtCtMul is
+similar with LWE and RLWE, the RLWE PtCtMul processes
+thousands of times more plaintext data in each operation, and
+hence boasts much superior computational efficiency.
+Computation efficiency comparison with preprocessing.
+Preprocessing changes the above comparison. Note that in
+bothLWEandRLWEciphertexts,onlythesecondcomponent
+depends on the plaintext. The first component a is purely
+random and independent of the plaintext. In the context of
+PIR, the plaintext operand is the database, which is known in
+advance. Then, the computation involving the a component
+can be precomputed in an offline preprocessing phase.
+For RLWE-based SHE, this observation is immaterial be-
+cause the computation involving a is only half of the total
+===== PAGE 12 =====
+[LEFT]
+LWE
+, ,
+RLWE
+, ,
+Fig.5. AnillustrationofLWE-basedandRLWE-basedPtCtMul.Thelight-
+colored terms are fixed in advance and can be precomputed in the offline
+phase.Thedark-coloredtermsrequireonlinecomputations.
+cost. For LWE-based SHE, however, this observation makes
+a huge difference. The dominant part of the computation
+for LWE-based PtCtMul(m,a) can now be precomputed.
+The remaining online computation (m·b) is a single scalar
+multiplication. This helps LWE-based SHE match RLWE-
+based SHE asymptotically in terms of online computation,
+when normalized by the amount of plaintext data. In fact, the
+online computation efficiency of LWE-based SHE is now a
+constant factor (about 4×) better than that of RLWE-based
+SHE, because it does not need NTT.
+This observation gives rise to several single-server server-
+preprocessing PIR schemes [59]–[62] with improved (though
+still linear in N) online server computation. We next explain
+their high-level ideas.
+B. Single-Server Server-Preprocessing PIR based on LWE
+The overall structure of these schemes is similar to that
+of Algorithm 5. In Algorithm 5, the inner product between
+DB′ and q using PtCtMul dominates the online server
+1
+computation. The main idea is to use an LWE-based SHE for
+the first dimension to improve the online server computation.
+√
+Thequeryvectorq consistsof N ciphertexts.WithLWE-
+1
+based SHE,
+ 
+a b
+1 1
+ a 2 b 2 
+q 1 =  . . . .  
+ . . 
+a√ b√
+N N
+√
+The above can be written as q =(A,b), where A is a N-
+1 √
+by-n matrix and b is a column vector of length N. The
+innerproducts cannowbeexpressed asmatrixmultiplication:
+DB·q =DB·(A,b)=(DB·A,DB·b).
+1
+As illustrated in Figure 6, if both DB and A are fixed in
+advance, then the server can precompute DB·A and reuse
+the result in all online PIR queries from all clients. Here, it
+is assumed that the database DB rarely changes (a common
+assumptioninserver-preprocessingPIR).ThematrixA,which
+consists of the first components of LWE ciphertexts, is typi-
+cally generated randomly on-the-fly by each client. In order
+to fix A, the server can generate it pseudorandomly from a
+[RIGHT]
+12
+,
+Online
+Pre-computed
+Computation
+,
+Fig. 6. Separating the first dimension inner product into online and offline
+phases.Thelight-coloredtermsarefixedinadvanceandaremultipliedinthe
+offlinephase.Thedark-coloredtermsrequireonlinecomputations.
+shortrandomseed.Theseedisconsideredpartofthedatabase
+metadata that each client obtains before making PIR queries.
+This way, every client can reproduce and use the same matrix
+A in all their PIR queries.
+Algorithm 6 describes a single-server server-preprocessing
+PIR scheme following this paradigm. The database is struc-
+tured as a square matrix in column-major order. The client
+generatestwoencryptedone-hotvectors,correspondingtothe
+column and row of the desired index in the square matrix.
+Crucially, the first one-hot vector is encrypted using LWE.
+As discussed, the same pseudorandom matrix A is generated
+from the same public seed by the server and all clients on
+all queries. We note that the client need not include A in the
+PIR query since the server already has it; only the plaintext-
+dependent term b needs to be sent.
+Reusing A across queries warrants some discussion. In
+LWE encryption, security critically depends on either the first
+component a or the secret key s being random. Now that A
+is fixed, the client in Algorithm 6 must use a fresh secret key
+s for each PIR query. (In contrast, the client in Algorithm 5
+can use either a fresh or a long-term secret key.)
+The server evaluates the first inner product, which is ex-
+pressed as a matrix multiplication. As discussed, the bulk of
+the computation arises from DB·A and takes place in the
+offline preprocessing phase. After this step, the server holds a
+column of the database encrypted with LWE.
+From here, there are several design choices. First, one
+could skip the second dimension altogether and send back
+an entire encrypted column (after some compression) [59],
+[60]. This design incurs a large response size. Algorithm 6
+leaves out this option and instead assumes a second inner
+product will be performed. There are at least two approaches
+to this second inner product. One option is to reinterpret
+the LWE ciphertexts as plaintexts and repeat the LWE-based
+matrix multiplication [61]. Another option is to switch to
+RLWE for the second dimension, which requires converting
+LWE ciphertexts into RLWE ciphertexts [62]. The rest of
+Algorithm 6 is similar to Algorithm 5. The server sends back
+===== PAGE 13 =====
+[LEFT]
+Client
+Input: x, the desired index
+................................................Start online pha
+(cid:108) √ (cid:109)
+x 1 ← x/ N // columnofx
+√
+x 2 ←x−(x 1 −1) N // rowofx
+m ,m ←one-hot encodings of x ,x
+1 2 1 2
+Regenerate A from the public seed
+Sample a fresh secret key s
+b←A·s+∆m 1 +e // LWE-basedSHE
+q 2 ←Enc(s,m 2 ) // eitherLWE-basedorRLWE-basedSHE
+b,q
+2
+r
+Return Dec(s,r)
+Algorithm 6. Server-preprocessingsingle-serverPIRwithLWE-basedSH
+the encrypted result after the second-dimension homomorphic
+innerproduct.Theclientdecryptsandreconstructsthedesired
+entry.(IfRLWEisusedfortheseconddimension,theclient’s
+LWE secret key is reinterpreted as an RLWE secret key [63].)
+Efficiency. In the offline phase, the server precomputes the
+matrix multiplication DB · A. A straightforward implemen-
+tation requires O(Nn) computation. A more sophisticated
+approach uses a structured matrix A along with RLWE tech-
+niques to reduce the offline computation to O(Nlogn) [61].
+IftheseconddimensionusesRLWE,additionalpreprocessing
+is required to prepare for the LWE-to-RLWE conversions.
+It is worth noting that updating a single database entry
+requires redoing part of the preprocessing (or even the entire
+preprocessing in some advanced schemes [61], [62]). In gen-
+eral, PIR schemes based on preprocessing are not well-suited
+for databases with frequent updates.
+√
+The online communication cost is O( N). The online
+server computation is O(N) for sufficiently large databases,
+since the first-dimension matrix multiplication touches every
+database entry. The second dimension may also contribute
+substantially to the online server computation cost. For exam-
+√
+ple, the LWE-to-RLWE conversions in [62] require O( Nn)
+online server computation.
+Finally, the scheme can require nontrivial client compu-
+tation. The client needs to compute A · s on every query.
+√
+These steps lead to O( Nn) online client computation in a
+basicimplementation.UsingastructuredmatrixAandRLWE
+√
+techniques can again reduce this cost to O( Nlogn) [61].
+[RIGHT]
+13
+Server
+Input: DB, the database
+√ √
+View DB as a N-by- N matrix in column-major order
+√
+A← N-by-n pseudorandom matrix generated from a public seed
+A′ ←DB·A
+ase for one query................................................
+b′ ←DB·b // Firstdimensioninnerproduct
+r←homomorphic inner product between (A′,b′) and q
+2
+HEandtwolevelsofrecursion.
+C. A Brief Survey of Server-Preprocessing PIR
+PIR with preprocessing was first studied in the aforemen-
+tioned work of Beimel, Ishai, and Malkin [57]. They give
+a family of multi-server server-preprocessing PIR schemes
+that, with k ≥ 2 servers, achieve O(N2k 1 −1) communication
+and O(N/(ϵlogN)2k−2) server computation, while requiring
+O(N1+ϵ) server storage.
+Lin, Mook, and Wichs [58] construct the first doubly
+efficient single-server server-preprocessing scheme. For any
+constant ϵ>0, their scheme requires O(N1+ϵ) preprocessing
+time and server storage, and achieves poly(λ,log1+2/ϵN)
+online communication and computation per query. Although
+the asymptotics look appealing, the scheme is still far from
+practical [64].
+Inspired by the observation that LWE is preprocessing-
+friendly, a line of work [59]–[62] proposes single-server
+server-preprocessing schemes whose online server computa-
+tionisstillO(N)butcheaperthanRLWE-basedschemes.The
+scheme we presented in this section is a simplified version of
+this line of work.
+We next mention a few works that do not fit cleanly into
+our classifications.
+Boyle et al. [65] and Canetti et al. [66] first explored
+doublyefficientsingle-serverPIR.Theyfirstconsideraclient-
+preprocessing setting in which each client downloads and
+preprocesses the database, but the preprocessed database is
+stored back on the server. Note that in this model, the server
+needs to store a separate copy of the database for each
+client,andeachcopyisasymptoticallylargerthantheoriginal
+database. This is at odds with the public database nature of
+PIR (see the discussion in Section II-D on ORAM). Boyle
+===== PAGE 14 =====
+[LEFT]
+Client Server S
+1
+Input: DB,the database
+ping for hints
+For each hint k∈[M],
+√
+∀j ∈[ N],H[k][j]←$I
+j
+√
+N
+(cid:77)
+P[k]← DB[H[k][j]]
+j=1
+(H,P)
+Store H and P
+Algorithm 7. The√offline preprocessing phase of the two-server stateful
+PIRscheme.M =λ N hintsaresampledwhereλisasecurityparameter.
+et al. [65] also proposed a heuristic transformation of their
+scheme so that a trusted third party performs preprocessing
+and the server stores a single (preprocessed) copy of the
+database. In addition to the limitations in the models, these
+twoworksrelyonless-studiedcryptographicassumptionsand
+heavyweight theoretical tools.
+SimplePIR [67] and FrodoPIR [68] are the first to observe
+that the bulk of the computation in LWE-based SHE can
+be offloaded to a preprocessing phase, so that the online
+computation is O(N) but cheaper than RLWE. In these two
+schemes, the preprocessing computation is performed entirely
+by the server, but each client needs to download and store the
+√
+preprocessing result. The client storage required is O( Nn),
+wherenistheLWEvectorlength,typically1024.Thus,these
+twoschemesaremoresuitablefordatabaseswithlargeN such
+√
+that Nn≪N.
+VII. STATEFULCLIENT-PREPROCESSINGPIR
+Inmanyclient-preprocessingPIRschemes,theclientstores
+some preprocessed information locally, so these schemes are
+also called stateful PIR schemes. Most stateful PIR schemes
+are doubly efficient, i.e., their amortized communication and
+computation costs are both sublinear in N. We describe a
+simple two-server stateful PIR scheme in this section.
+A. Problem Definition
+A stateful client-preprocessing PIR scheme consists of two
+phases: an offline preprocessing phase and an online query
+phase.
+1) Intheofflinepreprocessingphase,theclientinteractswith
+theserver(s)toobtainsomehintsaboutthedatabase.The
+hints are stored locally at the client.
+2) In the online query phase, the client utilizes the stored
+hints to perform queries. The interaction in this phase
+is similar to PIR without preprocessing in Figure 1: the
+client sends a query, receives a response, and computes
+the answer.
+The hints are specific to one client. In other words, every
+client must perform the offline preprocessing phase separately
+with the server(s). Needless to say, the hints stored by a
+[RIGHT]
+14
+client must be smaller than the database for the scheme to
+be nontrivial.
+The offline preprocessing phase inevitably involves compu-
+tationlinear(andoftensuperlinear)inthedatabasesize.Thus,
+astatefulPIRschemeshowsitsbenefitsonlyifthesameclient
+makes many queries to the database during the online query
+phase.(Incomparison,aserver-preprocessingPIRschemecan
+show benefits after many clients each make one query.)
+Correctness and privacy. Note that correctness and privacy
+aredefinedforasinglequeryinSectionII.Thatisappropriate
+for standard PIR (without preprocessing) because the client
+thereisstateless,andtheserver’sstatedoesnotchange.Thus,
+even if the client makes multiple queries, the correctness and
+privacy of a query are clearly independent of other queries.
+For a stateful PIR, however, that is often not the case, as
+the client state may create dependency between queries. We
+extend the correctness and privacy definitions in Section II
+fromasinglequerytoasequenceofqueries.Theclientwishes
+to retrieve a sequence of desired entries whose indices are
+[x ,x ,...,x ]. The client does not have to come up with
+1 2 m
+the sequence upfront. An index in the sequence can depend
+on the answers to the previous queries.
+• Correctness:Forasequenceofindices[x 1 ,x 2 ,...,x m ],
+the i-th answer computed by the client must match the
+x -th entry in the database.
+i
+• Privacy: The server learns no information about the
+client’s desired indices from the sequence of the client’s
+queries. The indistinguishability game for privacy from
+Section II extends naturally to two sequences of indices.
+B. A Two-server Stateful PIR Scheme
+We next describe a simple two-server stateful PIR scheme.
+The two servers S and S each hold a copy of the database
+1 2
+DB. Looking ahead, the client will retrieve hints from S and
+1
+use those hints to perform queries with S .
+2
+LetthedatabaseDBconsistofN entriesindexedbyintegers
+√
+in [N]. We partition the database DB into N partitions,
+√
+each containing N consecutive entries. Concretely, the j-
+√
+th partition for each j ∈[ N] contains the entries at indices
+(cid:110) √ √ √ (cid:111)
+I = (j−1) N +1,(j−1) N +2,...,j N .
+j
+Looking ahead, the scheme often samples a uniformly
+random index from a partition. We write r ←$ I
+j
+to mean
+that r is an index sampled uniformly randomly from the j-th
+partition.
+The offline preprocessing phase. During the offline pre-
+processing phase, S samples M hints and sends them to
+1
+the client. The value of M will be specified later. Each hint
+√
+consists of N randomly sampled indices, one from each
+partition, and the parity (i.e., bitwise XOR) of the entries at
+those indices. Precisely, the k-th hint is (H[k],P[k]) where:
+√
+• H[k] is a list of N indices where H[k][j] ←$ I j is a
+random index from the j-th partition, and
+(cid:76)
+• P[k] = h∈H[k] DB[h] is a parity of the entries at the
+indices in H[k].
+Server S then sends H and P to the client. The client stores
+1
+H and P locally. The pseudocode of the offline preprocessing
+phase is given in Algorithm 7.
+===== PAGE 15 =====
+[LEFT]
+Observe that an entry can be recovered from the parity and
+alltheother entriescontributingtotheparity,i.e.,ifx∈H[k],
+ 
+(cid:77)
+DB[x]=P[k]⊕ DB[h].
+h∈H[k]\{x}
+This observation is the central idea of most stateful PIR
+schemes in the literature. We will rely on it to retrieve entries
+during the online query phase.
+The online query phase. Given a desired index x, the client
+computes the partition ℓ containing the desired index as:
+(cid:24) (cid:25)
+x
+ℓ= √ .
+N
+Then, the client finds a hint whose set of indices contains x,
+i.e., the client scans the set of hints to find a hint k such that
+H[k][ℓ]=x.
+TheparameterM mentionedintheofflinephasewillbesetto
+ensure that such a hint exists with overwhelming probability.
+We call hint k the selected hint.
+√
+The client then constructs a query q consisting of N
+√
+indices such that for every j ∈[ N],
+(cid:40)
+H[k][j], j ̸=ℓ,
+q[j]=
+α
+ℓ
+←$I
+ℓ
+, j =ℓ.
+In other words, the query q consists of the indices in the
+selected hint H[k], except that H[k][ℓ] (which is the desired
+index x) is replaced with a random index from partition ℓ.
+NotethatitiscriticaltoreplaceH[k][ℓ].Iftheclientsimply
+sends all the indices in H[k], it is clearly insecure, since the
+desired index x always appears in the query q, allowing the
+server to narrow it down to the set of indices in q. With the
+replacement, all the indices in q are random.
+The client sends q to server S . S returns the database
+2 2
+entries at the indices in q. Specifically, the response r consists
+√ √
+of N database entries such that for all j ∈[ N],
+r[j]=DB[q[j]].
+Finally, the client computes
+ 
+(cid:77)
+ r[j]⊕P[k]
+√
+j∈[ N]\{ℓ}
+as the answer. This uses the previous observation that the
+desired entry can be recovered from the parity and the other
+entries involved in the parity.
+The pseudocode and a pictorial illustration for constructing
+the query can be found in the top part of Algorithm 8 and
+Figure 7.
+Hint replenishment. The selected hint k cannot be reused
+for subsequent queries because the server has already seen
+(most of) the indices in that hint. As it turns out, it would
+also be incorrect and insecure if the client simply discarded
+the used hint k and continued making subsequent queries.
+Consider a situation in which the client repeatedly queries the
+same desired index x. The selected hints for all these queries
+[RIGHT]
+15
+must contain the desired index x. If the used hints are simply
+discarded,allthehintscontainingxwillsoonbedepleted,and
+subsequent queries for x can no longer be fulfilled, violating
+correctness. The reason why privacy would also be affected
+is more subtle. Once many hints containing x are consumed
+(even before they are depleted), the server can observe that
+the index x appears in subsequent client queries with a lower
+frequency than other indices, thereby revealing to the server
+that the client likely queried x previously.
+Therefore, after the client consumes a selected hint to
+complete a query, the client needs to carry out a procedure
+to replace the consumed hint with a new hint. The new hint
+must follow the same distribution as the consumed hint, i.e.,
+containing the desired index x from partition ℓ and random
+indices from all the other partitions. We call this procedure
+hint replenishment. It can be done as follows.
+TheclientpingsserverS torequestanewhint.S samples
+1 1
+a new hint for the client, like what it did during the offline
+preprocessing phase: it samples one random index from each
+√
+partition, i.e., a vector h where ∀j ∈ [ N], h[j] ←$ I
+j
+.
+Furthermore, S sends the client the database entries at those
+1 √
+indices, i.e., DB[h[j]] for each j ∈[ N].
+The client updates the consumed hint k as follows:
+(cid:40)
+h[j], j ̸=ℓ
+H[k][j]=
+x, j =ℓ
+In other words, the client replaces the ℓ-th index in the hint
+with the desired index x that it just queried. This modifies a
+regular hint h into one that follows the same distribution as
+the consumed hint, i.e., containing the desired index x from
+partition ℓ and random indices from all the other partitions.
+Theclientnowneedstocomputetheparityforthismodified
+hint, which should be
+   √ 
+ℓ−1 N
+(cid:77) (cid:77)
+P[k]= DB[h[j]]⊕DB[x]⊕ DB[h[j]].
+j=1 j=ℓ+1
+DB[x] has just been retrieved by the client. Each DB[h[j]] is
+sent to the client by S . The client can thus easily compute
+1
+the above parity.
+The pseudocode and a pictorial illustration of the hint
+replenishment procedure can be found in the bottom part of
+Algorithm 8 and Figure 7.
+C. Correctness, Privacy, and Efficiency
+We provide a proof sketch for the correctness and privacy
+of the scheme.
+Correctness. Let us first consider the very first query. The
+clientcorrectlyretrievesthedesiredentryifitfindsahintthat
+containsthedesiredindexx.Sinceeachhintsamplesarandom
+index per partition, the probability that a hint contains the
+desired index is √1 . Since hints are sampled independently
+N √
+of each other, if the client samples M = λ N hints during
+the offline preprocessing phase, then the probability that none
+of the M hints contains x is:
+√
+(cid:18) 1 (cid:19)λ N
+1− √ <e−λ.
+N
+===== PAGE 16 =====
+[LEFT]
+Database
+Desired Index
+Used hint
+Query
+Random Index
+Query
+A New Hint
+Replenish
+Updated Hint
+Fig.7. Anillustrationforthequeryconstructionandhi
+Client
+Input: x, the desired index
+(cid:108) √ (cid:109)
+ℓ← x/ N
+Find k such that H[k][ℓ]=x
+q←H[k]
+q[ℓ]←$ I
+ℓ
+(cid:32)ℓ−1 (cid:33)  √ N 
+(cid:77) (cid:77)
+a←P[k]⊕ r[j] ⊕ r[j]
+j=1 j=ℓ+1
+..................................................
+ping
+H[k]←h
+H[k][ℓ]←x
+(cid:32)ℓ−1 (cid:33)  √ N 
+(cid:77) (cid:77)
+P[k]= rh[j] ⊕DB[x]⊕ rh[j]
+j=1 j=ℓ+1
+Return a
+Algorithm 8. Theonlinequeryphasewithhintreplenishme
+andhintparitiesPareinitializedbyAlgorithm7andstoredb
+[RIGHT]
+16
+intreplenishmentinthetwo-serverstatefulPIRscheme.
+Server S
+2
+Input: DB, the database
+q
+√
+∀j ∈[ N],r[j]←DB[q[j]]
+r
+..................................................
+Server S
+1
+Input: DB, the database
+g to replenish a hint
+√
+∀j ∈[ N],h[j]←$ I
+j
+√
+∀j ∈[ N],rh[j]←DB[h[j]]
+(h,rh)
+entofthetwo-serverstatefulPIRscheme.ThehintindicesH
+bytheclientacrossqueries.
+===== PAGE 17 =====
+[LEFT]
+√
+Setting M to O(λ N) makes the probability of correctness
+failure exponentially small in the security parameter λ.
+To extend this analysis to subsequent queries, we ob-
+serve that the hint distribution remains the same before and
+after each query because the hint replenishment procedure
+replenishes a hint that follows the same distribution as the
+consumed hint. Then, following the same argument made for
+the first query, the client will be able to find suitable hints to
+fulfillallsubsequentqueriesexceptforanexponentiallysmall
+probability.
+Privacy. Privacy against server S is straightforward since
+1
+the client only receives hints from S and never sends any
+1
+information to S . We focus on privacy against server S . Let
+1 2
+usagainlookattheveryfirstquery.Theselectedhintcontains
+the desired index and random indices from other partitions.
+The query q then replaces the desired index in the selected
+hint with a random index from the same partition. Hence,
+the query q sent to S consists of one random index from
+2
+each partition, independent of the desired index. Therefore,
+S learns no information from q about the desired index.
+2
+Similarly to the correctness proof, the privacy proof can
+be extended to subsequent queries by showing that the hint
+distribution, even conditioned on the view of S during a
+2
+query, remains unchanged before and after each query. More
+precisely,thesetofhintsremainsidenticallydistributed,since
+each consumed hint is replaced by a newly sampled hint that
+follows the same distribution.
+Client storage. A keen reader may have noticed that the
+client storage of the presented scheme is superlinear in N. In
+√
+particular, the client storage is O(λNlogN+λ Nw) where
+wisthesizeofeachdatabaseentryinbits.Thisstoragecomes
+√ √
+fromtheM =O(λ N)hints,whereeachhintcomprises N
+random indices of O(logN) bits each and a parity of w bits.
+When the entry size w is smaller than O(λlogN), the client
+storage in the presented scheme can be even larger than the
+entire database, which is clearly unreasonable.
+Fortunately, the superlinear client storage is from the ran-
+domlysampledindices.WecanuseaPseudorandomFunction
+(PRF) to generate all the indices in all the hints pseudoran-
+domly from a single random seed of O(λ) bits. Some care is
+needed when dealing with replenished hints. Recall that the
+client receives a (now PRF-generated) hint from the server S
+1
+but then overwrites one of its indices with the just queried
+desired index to obtain the replenished hint. The client needs
+to keep track of this change for each replenished hint and act
+accordingly during hint selection and query construction.
+After applying PRF and accompanying modifications, the
+√ √
+scheme uses O(λ NlogN +λ Nw) bits of client storage,
+which is sublinear in N and smaller than the database for
+most realistic values of N. A trade-off is that the scheme’s
+privacy guarantee is downgraded from information-theoretic
+to computational.
+Communication and Computation. The offline preprocess-
+ing phase is run only once, after which the client can make
+unlimited queries in the online phase. Thus, after sufficiently
+manyqueries,theofflinepreprocessingcostbecomesinsignif-
+[RIGHT]
+17
+icantintheamortizedsense.Theamortizedcostofthestateful
+PIR scheme is thus just the cost of the online query phase.
+√
+During each query, the client sends N indices to S
+√ 2
+and receives N entries. Furthermore, the client receives
+√
+N indices and entries from S for a new hint. Hence, the
+√ 1 √
+communication cost is O( NlogN + Nw).
+The servers do not perform much additional computation
+√
+beyondreadingthe N entriesfromthedatabaseandsending
+them to the client. Since the server’s computation cost is
+small, the client’s computation should now be analyzed in the
+stateful PIR paradigm. To select a hint, the client needs to
+√
+examine N hints in expectation. If the hint’s indices are
+√
+generated by PRF, this step requires O( N) PRF evaluations
+in expectation. After receiving the server response, the client
+√
+computesaparityof N entries.Dependingontheentrysize,
+√
+the client computation bottleneck is either the O( N) PRF
+√
+evaluation or the O( N) w-bit XORs.
+D. Adapting to the Single-server Setting
+Manytwo-serverstatefulschemes,includingtheonewejust
+presented, can be adapted to the single-server setting.
+With only a single server, the client has to fetch hints from
+the same server it sends queries to. Thus, the hints need to
+be fetched from the server in a private manner, without the
+server learning any information about them. This can be done
+bystreamingtheentiredatabasetotheclientduringtheoffline
+preprocessing phase. While streaming the database is costly
+and inelegant, attemptsto fetch hints privatelywithout it [32],
+[69], [70] have not yielded practical solutions.
+In addition to the main hints, the client also needs to fetch
+somebackuphintsinthepreprocessingphase[69].Thebackup
+hints are used to replenish consumed hints after each query.
+Eventually, the client will run out of backup hints. Thus, the
+preprocessing phase needs to be executed periodically in the
+single-server setting (rather than only once at the beginning
+with two non-colluding servers).
+It is worth noting that many existing single-server stateful
+PIR schemes can achieve sublinear (in N) amortized commu-
+nication from only one-way functions. (A recent work even
+achieves this without any cryptographic assumptions [71].)
+In contrast, single-server PIR with sublinear communication
+without preprocessing is believed to require cryptographic
+primitives stronger than one-way functions (Section II-D).
+E. A Brief Survey of Sublinear Stateful PIR Schemes
+Patel, Persiano, and Yeo [72] introduced the paradigm of
+statefulclient-preprocessingPIRandpresentedasingle-server
+stateful scheme. Their goal in that work was not to achieve
+sublinear in N server computation. Instead, it was to replace
+the O(N) expensive RLWE homomorphic operations with
+O(N) PRF evaluations for server computation. The client in
+√
+their scheme has to store O( N) hints and perform O(N)
+PRF evaluations.
+Corrigan-Gibbs and Kogan [73] constructed the first state-
+ful PIR scheme with sublinear server computation. In their
+scheme,theclientfetcheshintsfromthefirstserverduringthe
+offline preprocessing phase, uses the hints to make queries to
+===== PAGE 18 =====
+[LEFT]
+the second server, and replenishes a hint from the first server
+aftereachquery.Thisblueprintisfollowedbymostsubsequent
+two-serverstatefulschemes,includingtheonewepresentedin
+this section. Corrigan-Gibbs, Henzinger, and Kogan [69] later
+adapted the above blueprint to a single server using backup
+hints.
+Yeo proves a lower bound on the space-time trade-off of
+stateful PIR schemes: ST = Ω(N) where S is the client
+storage and T the online server computation [74]. Early
+schemes [69], [73] have large gaps of poly(λ,logN) factors
+from this lower bound. Subsequent works have gradually
+removed these extra factors. Notably, ST =O(λN) has been
+achieved with reasonable practical efficiency both with two
+servers[75]andwithasingleserver[76],[77].Theschemewe
+presentedinthissectioncanbeviewedasasimplifiedversion
+of TreePIR [75], which introduces the partition-based hints
+and relies on two servers. The remaining λ factor comes from
+√
+theM =O(λ N)hintsneededtodrivedownthecorrectness
+failure probability. Building on a new permutation-based hint
+structureof[78],WangandRen[79]constructasingle-server
+scheme that achieves the asymptotically optimal ST =O(N)
+trade-off.
+Two-server stateful schemes have also achieved polylogN
+communicationwithreasonablepracticalefficiency[75],[80].
+Single-server schemes with polylogN communication [81],
+[82] have thus far relied on theoretical cryptographic tools
+with no known practical instantiations.
+VIII. KEYWORDPIR
+So far in this article, we have assumed that the database
+entries are identified by integer indices {1,2,...,N}. We
+refer to this standard variant as index PIR. In many practical
+applications, however, the database entries are identified by
+arbitrary strings or keywords rather than integer indices. For
+example, in the news-reading example, a news article is often
+identified by its title or URL. This calls for a variant of PIR
+called keyword PIR.
+A. Problem Definition
+In keyword PIR, the database DB consists of N key-value
+pairs, DB={(k ,v ),(k ,v ),...,(k ,v )}, and the client
+1 1 2 2 N N
+wantstoretrievethedatabaseentrycorrespondingtoadesired
+key x. The interaction between the client and the server stays
+the same as in Figure 1: the client sends a query, receives a
+response, and computes the answer. The privacy definitions
+in Sections II-B and VII-B also extend naturally to keyword
+PIR. The correctness definition, however, comes with a small
+modification. If the client’s desired key is in the database, the
+client must retrieve the corresponding value as usual. But if
+theclient’sdesiredkeyisnotpresentinthedatabase,thenthe
+client must learn this fact. More formally,
+• Correctness: If (x,v)∈DB, then the answer computed
+by the client equals v; if (x,v) ̸∈ DB, then the answer
+computed by the client is a special symbol ⊥.
+OnecanalsothinkofthekeywordPIRproblemasanindex
+PIR on a sparse database. More concretely, suppose that each
+keywordisn-bitlong.Onecan,ofcourse,treateachkeyword
+[RIGHT]
+18
+asann-bitintegerandsolvekeywordPIRtriviallybyrunning
+anindexPIRonadatabaseof2n entries,wheretheN entries
+reside at the positions corresponding to their keywords and
+theotherentries(correspondingtothenon-existentkeywords)
+are ⊥. But it is easy to see that this trivial scheme can be
+extremelycostlybecauseitsefficiencydependsonthekeyword
+space 2n, which can be orders of magnitude larger than N.
+KeywordPIRschemesintheliteraturehavetheirefficiency
+depend on N, the number of entries in the database. We will
+present one such scheme based on a cuckoo hashing table.
+B. Cuckoo Hash Table
+A cuckoo hash table uses several hash functions to insert
+a set of N key-value pairs into an array CH whose size is
+slightly larger than N. Typical parameter choices are two
+hash functions with |CH| ≈ 2N or three hash functions with
+|CH| ≈ 1.5N. The keyword PIR scheme in this section uses
+the former. Let h and h denote two hash functions that map
+1 2
+keys to random positions in CH.
+The main invariant of the cuckoo hash table is that a key-
+valuepair(k,v)canonlyresideinoneofthetwopositionsin
+CH specified by the two hash functions. More concretely, if
+(k,v) has been inserted, then one of CH[h (k)] or CH[h (k)]
+1 2
+equals k∥v.
+Note that CH stores a value with its key prepended. (We
+assumeallthekeysarepaddedtoafixedlength.)Thisensures
+there will be no false positives: if no key-value pair with key
+k has ever been inserted into the cuckoo hash table, then no
+element in CH starts with k.
+With the above invariants, a cuckoo hash table lookup is
+straightforward: given a key k, simply read the two entries of
+CH at positions h (k) and h (k). If one of the entries is k∥v,
+1 2
+then return v as the value; If neither entry starts with the key
+k, then return ⊥.
+There is a chance that the N key-value pairs cannot all be
+inserted while respecting the invariant. But the probability of
+thathappeningissmall.Ifithappens,onemayalsoretrywith
+a different set of hash functions.
+C. Keyword PIR using a Cuckoo Hash Table
+Algorithm9givesakeywordPIRschemethatusesacuckoo
+hash table and invokes an index PIR scheme twice. The same
+transformation also yields preprocessing/stateful keyword PIR
+from preprocessing/stateful index PIR.
+The server picks two hash functions h (·) and h (·), and
+1 2
+insertseverykey-valuepairinthedatabaseDBintothecuckoo
+hashtabletoobtainthearrayCH.Weassumetheclientlearns
+the two hash functions used as part of the database metadata
+beforethePIRprotocolstarts.Then,givenadesiredkeyx,the
+clientessentiallyperformsthecuckoohashtablelookupusing
+indexPIR.Concretely,theclientmakestwoindexPIRqueries
+in parallel with the desired indices being h (x) and h (x). If
+1 2
+one of the two index PIR answers is x||v, the keyword PIR
+returns v. If neither of the two index PIR answers starts with
+the keyword x, the keyword PIR returns ⊥.
+Privacy follows from the index PIR privacy. Correctness
+followsfromthecuckoohashtableproperty.Itisworthnoting
+===== PAGE 19 =====
+[LEFT]
+Client
+Input: x, desired keyword
+h 1 (x) C
+a Index PIR
+1
+h 2 (x) C
+a Index PIR
+2
+If any a =x||v, return v
+j
+Else, return ⊥
+Algorithm 9. KeywordPIRfromindexPIR.Theclientandthes
+Client
+Input: {x ,x ,...,x }, desired keywords
+1 2 b
+Insert every x into cuckoo hash table CH
+i
+CH[1]
+a Keyword PIR
+1
+CH[2]
+a Keyword PIR
+2
+. .
+. .
+. .
+CH[m]
+a Keyword PIR
+m
+a←{a |CH[i] is not empty}
+i
+Return a
+Algorithm 10. BatchPIRusinganykeywordPIRscheme(e.g.,Algorithm9
+bucketsism=|CH|≈1.5b.
+that the failure probability of the cuckoo hash table does not
+affect the correctness or privacy of the keyword PIR scheme.
+If the server fails to insert all entries into the cuckoo hash
+table, it can simply choose a different set of underlying hash
+functions and try again. The server can repeat this process
+until all the entries in the database are successfully inserted.
+Thisiswhyacuckoohashtablewithonlytwohashfunctions,
+despiteitshigherfailureprobability,isnotonlysufficienthere
+but also preferred due to its better efficiency.
+The keyword PIR scheme invokes an index PIR scheme
+twice on a database of size ≈2N. Hence, the communication
+costisatmost2×oftheunderlyingindexPIR,andtheserver
+computation is at most 4× of the underlying index PIR. With
+additionaltricks[83],theservercomputationcanapproach1×
+the underlying index PIR.
+D. A Brief Survey of Keyword PIR
+Keyword PIR was first studied in Chor et al. [84]. They
+gave a black-box transformation from index PIR to keyword
+PIR, using logN sequential invocations of an index PIR
+scheme. The cuckoo-hashing-based keyword PIR presented in
+[RIGHT]
+19
+Server
+Input: DB, the database as key-value pairs
+Insert every (k,v)∈DB into cuckoo hash table CH
+CH
+CH
+serveragreeonthetwohashfunctions.
+Server
+Input: DB, the database
+Initialize m buckets B[1],B[2],...,B[m]
+Add every (k,v)∈DB to B[h (k)],B[h (k)],B[h (k)]
+1 2 3
+B[1]
+R
+B[2]
+R
+.
+.
+.
+B[m]
+R
+9).Theclientandtheserveragreeonthethreehashfunctions.Thenumberof
+this section is known in the folklore and is articulated by Ali
+et al. [7]. There are also keyword PIR schemes that are not
+black-box transformations from index PIR [83], [85], [86]. In
+particular, Patel et al. [83] further reduce the response size to
+less than 2×, at the expense of heavy offline preprocessing
+and slightly higher online server computation than the cuckoo
+hash table approach.
+IX. BATCHPIR
+In the PIR variants discussed so far, we have assumed that
+the client has a single entry to retrieve from the server. In
+some applications, the client may want to retrieve a batch of
+entries from the server. We call this variant batch PIR.
+A. Problem Definition
+InbatchPIR,theclienthasasetofbdesiredindicesorkey-
+words {x ,x ,x ,...,x } and wants to retrieve all b entries
+1 2 3 b
+from DB corresponding to these indices or keywords. The
+interface and correctness/privacy definitions from Section II
+extend naturally to batch PIR: the client obtains all b entries
+===== PAGE 20 =====
+[LEFT]
+and no information is revealed about the b desired indices or
+keywords.
+A trivial batch PIR scheme is to execute b instances of a
+keyword/index PIR scheme in parallel. Doing so will require
+b times the server computation cost of the underlying key-
+word/index PIR scheme. Batch PIR schemes in the literature
+aimtomakeservercomputationdependonlyonN andnoton
+the batch size b. The communication cost inevitably depends
+on b since the client needs to receive the b entries.
+Note that preprocessing-based PIR schemes also assume
+thattheclientwantstoretrievemanyentriesfromthedatabase.
+So,preprocessing-basedPIRandbatchPIRaretwoparadigms
+for improving the amortized server computation of PIR. The
+difference between the two is that a batch PIR requires
+the client to have the entire batch ready upfront, whereas
+a preprocessing-based PIR allows the client to generate the
+sequence of queries one by one, potentially dependent on the
+answers to prior queries. In this sense, preprocessing-based
+PIR is a stronger primitive and, as expected, is harder to
+construct.
+B. Batch PIR using a Cuckoo Hash Table
+We describe the batch PIR scheme from Angel et al. [5],
+[31]. For concreteness, we describe the keyword version of
+batch PIR. The index version is similar. The construction is
+given in Algorithm 10.
+The construction uses a cuckoo hash table with three hash
+functions(see Section VIII-B).Theclient constructsacuckoo
+hash table CH by inserting all b keywords. Recall that the
+cuckoo hash table with three hash functions should have size
+|CH|≈1.5b. Let m denote |CH|.
+The server creates m buckets. The server then adds each
+entry in the database to all three buckets specified by the
+cuckoo hash functions h ,h ,h . To elaborate, using B[i] to
+1 2 3
+denote the i-th bucket, each entry (k,v) ∈ DB is added to
+buckets B[h (k)], B[h (k)], and B[h (k)].
+1 2 3
+Then,theclientandtheserverexecutemsingle-querykey-
+word PIR instances. In the i-th instance, the client’s keyword
+is CH[i] and the server’s input is the i-th bucket B[i]. Note
+that out of the m positions in CH, m−b ≈ 0.5b are empty.
+For each of these keyword PIR instances, the client can use
+a dummy keyword to make the query and discard the dummy
+answer. The answers from the other b keyword PIR instances
+are returned as the answer of the batch PIR.
+Correctness and Privacy. Privacy follows from the privacy
+of the underlying keyword PIR. For correctness, barring the
+small failure probability of cuckoo hash table insertions, it
+suffices to show that if a desired keyword k appears in CH[i],
+thenthecorrespondingbucketB[i]containsthecorresponding
+databaseentry.Thisisthecasebecauseeachentryisaddedto
+allthreebucketscorrespondingtothethreecandidatepositions
+in CH in which its keyword can appear.
+We remark that, contrary to the situation in keyword PIR,
+the failure probability of the cuckoo hash table may affect
+the correctness or privacy of batch PIR, depending on the
+implementation details. The difference arises from the fact
+that the keyword PIR scheme in Section VIII builds a cuckoo
+[RIGHT]
+20
+hashtableonasetofpublicdatabaseentries,whereasherethe
+client builds a cuckoo hash table on its secret input. This is
+why the scheme uses three hash functions to keep the failure
+probability small.
+Efficiency. Thetotalnumberofentriesintheserver’sbuckets
+combined is 3N, where N is the number of entries in the
+database. If we plug in a keyword PIR scheme with linear
+servercomputation(SectionVIII),thentheservercomputation
+cost of the batch keyword PIR is linear in N and independent
+of the batch size b. The communication cost of the batch
+keywordPIR,ontheotherhand,isproportionaltothenumber
+of buckets m, which is O(b).
+C. A Brief Survey of Batch PIR
+Batch PIR was first studied by Beimel et al. [57]. They
+slightly reduced server computation for a batch of queries
+(possibly from different clients) using fast matrix multiplica-
+tion.Alineofwork[87],[88]usesbatchcodestoobtainbatch
+PIR from single-query PIR. This approach achieves greater
+savingsinservercomputation,butthecommunicationismuch
+worse. Also, the batch of queries must come from a single
+client, a constraint adopted by most subsequent schemes,
+including the one we presented. The batch PIR scheme we
+presented in this section is from Angel et al. [5], [31]. Its use
+of a cuckoo hash table can be viewed as a probabilistic batch
+code, which has a small chance of failure but gives much
+better computation and communication costs. There are also
+customized schemes that are not black-box transformations
+from single-query PIR [53], [89], [90].
+X. PRACTICALPERFORMANCECHARACTERIZATION
+This section aims to give insights into the practical per-
+formance of the different PIR paradigms we reviewed in
+this article. We start with a disclaimer that it is difficult, if
+not impossible, to accurately characterize the performance of
+a wide variety of schemes across different paradigms in a
+short section. Different paradigms or schemes may choose
+to prioritize different metrics and exhibit different trade-offs.
+Some schemes come with many parameters that can be tuned
+tooptimizefordifferentmetrics,databasesizes,orentrysizes.
+Discrepancies in security assumptions, intended deployment
+scenarios, and engineering qualities further complicate the
+issue. As such, the numbers in this section should be read as
+rough estimates rather than precise evaluations. Nevertheless,
+we believe it is helpful for the reader to have a rough idea of
+how each paradigm of PIR fares in practice.
+A. Methodology
+Asdiscussedearlier,themainefficiencymetricsforPIRare
+querysize,responsesize,andservercomputation.Forschemes
+with linear server computation, we follow the literature and
+measure server computation using throughput, defined as the
+databasesize(inBytes)dividedbytheservercomputationtime
+(in seconds). Thus, higher throughput indicates faster server
+computation. The advantage of using throughput is that it
+remainslargelystablewhenthedatabasesizeorshapechanges
+===== PAGE 21 =====
+[LEFT]
+TABL
+PRACTICALPERFORMANCECHARACTE
+Two-Server Two-Server Sin
+Information- Computational Com
+Theoretic (DPF)
+QuerySize 23KB 1KB
+ResponseSize 23KB 2× 11
+Online
+ServerComputation 16GB/s 15GB/s
+Communication
+Offline
+ServerComputation
+QuerySize 90KB 1KB
+ResponseSize 90KB 2× 11
+Online
+ServerComputation 16GB/s 15GB/s 1
+Communication
+Offline
+ServerComputation
+CryptographicPrimitives none PRF R
+– The efficiencies of the first four schemes depend primarily on the database
+commonentrysizesrangingfromafewbytestoafewkilobytes,sowedono
+–Theefficienciesofthetwostatefulschemesaresensitivetoboththedataba
+–Anemptycellindicatesthatthemetricisnotapplicablefortheparadigm.A
+–Offlinecommunicationinsingle-servercomputationalPIRisfromtheclient
+–OfflinecommunicationinstatefulPIRsisfromtheservertoeachclient,and
+(as long as the database is not too small). For a scheme
+with sublinear server computation, the server computation
+is insignificant and not worth reporting. For all but one
+scheme, the client computation is insignificant and not worth
+reporting, so we omit client computation from the table. For
+schemesthatusepreprocessing,wereportthecomputationand
+communication for the online and offline phases separately.
+We report the numbers using a combination of back-of-the-
+envelopecalculationsandexperimentalevaluationusingavail-
+able implementations. Most PIR schemes are embarrassingly
+parallel. Thus, for simplicity, we use a single CPU core for
+both the client and the server.
+B. Performance Characterization
+Table II provides a performance characterization of the
+mainstream PIR paradigms reviewed in this article.
+Two-server information-theoretic PIR. We use the variant
+of Algorithm 2 that balances query size and response size.
+The communication cost is the square root of the database
+size in bytes. The server computation throughput is very high
+since the only server-side computation (beyond reading the
+database) is bitwise XOR.
+Two-server computational PIR. We use the DPF-based
+scheme in Algorithm 3 and its implementation at https://
+github.com/dkales/dpf-cpp. The DPF-based PIR achieves a
+good balance between communication and computation. The
+query (the DPF keys) is around 1 KB. The response size is
+only 2× of the plaintext entry size. The server computation
+throughput is slightly lower than that of the information-
+theoretic scheme.
+[RIGHT]
+21
+LEII
+ERIZATIONOFMAJORPIRPARADIGMS.
+ngle-Server Single-Server Two-Server Single-Server
+mputational Server- Stateful Stateful
+preprocessing
+1GBdatabase (32-byteentries)
+15KB 390KB 0.5KB 120KB
+1KBor4× 12KBor3× 4KB 120KB
+1GB/s 3.5GB/s – 13.5GB/s
+1.5MB 16MB 120MB
+10s 150s 20s 120s
+16GBdatabase (32-byteentries)
+15KB 1060KB 2KB 480KB
+1KBor4× 12KBor3× 16KB 480KB
+1.4GB/s 6.6GB/s – 13.5GB/s
+1.5MB 64MB 480MB
+160s 2100s 320s 2000s
+RLWESHE LWE&RLWESHE PRF LWESHE
+e size. They are largely independent of the database’s entry size, at least for
+otspecifyanentrysizeforthesefourschemes.
+asesizeandtheentrysize.Weuse32-byteentriesforthemasexamples.
+Adash(–)indicatesthatthecostistoosmalltobeworthreporting.
+ttotheserver,andtheserverstoresdataofthatsizeperclient.
+deachclientstoreshintsaboutthatsize.
+Single-server computational PIR. We use the updated
+OnionPIR [56] and its implementation at https://github.com/
+chenyue42/OnionPIRv2.DuetotheuseofRLWE-basedSHE,
+theservercomputationisroughlyanorderofmagnitudemore
+expensive (lower throughput) than the two-server schemes.
+The query size and the response size are both at least tens
+of kilobytes, as even a single lattice ciphertext is about that
+size. If a database entry does not fit in one ciphertext, the
+response size is about 4× of the plaintext entry size. The
+default mode of the scheme requires the client to send, and
+the server to store, additional helper data for each client,
+resulting in offline communication and extra server storage.
+Alternatively, the client can send the helper data as part of
+each query, incurring that cost online while avoiding offline
+communication and per-client server storage.
+Single-server server-preprocessing PIR. We use
+InsPIRe [62] and its implementation at https://github.
+com/google/private-membership/tree/main/research/InsPIRe.
+InsPIRe leverages LWE-based SHE and server preprocessing
+to improve online server computation over RLWE-based
+single-server PIR schemes. InsPIRe can be parameterized to
+achieve different trade-offs between query size and online
+server computation. We pick a parameter setting that gives
+noticeable improvements in online server computation over
+RLWE without excessively increasing the query size. The
+response size of InsPIRe is comparable to RLWE-based
+single-server PIR schemes. The main downsides of the
+scheme are large query size and inefficiency in handling
+database updates. (At the time of writing, a bug in the
+InsPIRe code results in large client computation, but it is
+easily fixable.)
+===== PAGE 22 =====
+[LEFT]
+Clientscanstoreh
+yes
+willmakemanyque
+databaseupdatesare
+Therearetwonon-
+colludingservers?
+Databaseupd
+no areinfrequen
+Fig.8. GuidelinesforselectingaPIRparadigmgivenapplicationanddeploym
+Two-server stateful PIR. We use the two-server variant
+of HarmonyPIR [91] and its implementation at https://github.
+com/PranavShriram/HarmonyPIR.Two-serverstatefulPIRcan
+make the server computation square root in the database size,
+and hence insignificant. The query size and response size
+are also square root in the size of the database. The main
+downsides are the need for client storage and offline server
+computation. Many sublinear stateful PIR schemes, including
+HarmonyPIR, can trade off client storage for amortized com-
+munication and computation costs in a proportional manner.
+Thedatareportedinthetablerepresentsanall-aroundefficient
+(but nevertheless arbitrary) parameter choice.
+Single-server stateful PIR. Although there are single-server
+stateful schemes with sublinear server computation [76], [77],
+[79], [91], [92], these schemes require the client to stream
+the entire database during the offline phase. Thus, we use
+SimplePIR [67], a single-server stateful scheme with linear
+server computation, and its implementation at https://github.
+com/ahenzinger/simplepir. SimplePIR uses LWE with prepro-
+cessing (see Section VI-B). As a result, its online server com-
+putationthroughputisbetterthanthatofsingle-serverstateless
+schemes and close to that of two-server stateless schemes.
+But it has to make significant sacrifices on other metrics,
+including high communication (both offline and online) and
+large client storage. The original SimplePIR implementation
+requires substantial server preprocessing and online client
+computation, but these can be significantly reduced using a
+structured matrix A and RLWE techniques (see Section VI-B
+and [93]).
+C. Deployment Guidelines
+Given the performance characteristics of different PIR
+paradigms summarized in Table II, we provide high-level
+guidelines in Figure 8 for selecting an appropriate PIR
+paradigm in practice based on the nature of the application
+and deployment constraints. These guidelines account for the
+most important factors and most common situations, but they
+are not intended to be exhaustive. Specific applications may
+haveuniquerequirementsorconstraintsthatjustifyalternative
+design choices.
+When it is reasonable to assume the existence of two non-
+colluding servers, two-server PIR paradigms are generally
+preferred because they tend to be substantially more efficient
+than single-server paradigms. In particular, the two-server
+[RIGHT]
+22
+yes Two-serverstateful
+hintsand (SectionVII-B)
+eriesAND
+infrequent? Two-serverDPF-based
+no (SectionIV)
+yes Single-serverserver-
+preprocessing(SectionVI-B)
+dates
+nt?
+Single-serverwithout
+no preprocessing(SectionV)
+mentconstraints.
+computational PIR based on DPF (Section IV) is about as
+efficient as a stateless PIR scheme can be. Two-server stateful
+PIR (Section VII-B) can further reduce server computation to
+amortized sublinear, but it comes with several requirements.
+First, clients must be able to store hints. Second, clients must
+plan to issue many queries over time to effectively amortize
+thehighcostoftheofflinephase.Third,databaseupdatesmust
+be infrequent, since each update requires additional work to
+refresh client hints. When all three conditions are satisfied,
+two-server stateful PIR may be preferred; otherwise, two-
+server DPF-based PIR is recommended.
+Theassumptionoftwonon-colludingservers,however,may
+not always be convincing. In practice, the two servers must
+coordinate closely to maintain identical and up-to-date copies
+of the database. Therefore, even when the two servers are op-
+erated by independent and reputable organizations, assuming
+they never collude—whether intentionally or inadvertently—
+may be difficult to justify. Single-server PIR paradigms avoid
+the non-collusion assumption, albeit at higher costs.
+With a single server, the server-preprocessing paradigm
+(Section VI-B) can improve online server computation (and
+possibly communication) by constant factors. However, if the
+database is frequently updated, the expensive preprocessing
+phase must be rerun frequently, likely negating the bene-
+fits.Consequently,single-serverPIRwithserver-preprocessing
+(Section VI-B) is recommended for static or rarely updated
+databases,whilesingle-serverPIRwithoutpreprocessing(Sec-
+tion V) is more suitable for frequently updated databases.
+We omit two-server information-theoretic PIR (Section III)
+and single-server stateful PIR (Section VII) from the above
+discussion because, in our view, they are not the most com-
+petitive options in most settings in practice.
+XI. SAMPLEAPPLICATIONS
+A. Live Caller ID Lookup
+In 2024, Apple added a new feature, Live Caller ID, to
+its phones [2]. A user’s phone will display the identity of
+the incoming caller even if the caller is not in the user’s
+contact list, or display “spam likely” if the caller has been
+reportedbyotherusersassuch.Tosupportthisfeature,Apple
+can maintain a database to map phone numbers to identities
+(“suspected spam” can be a special identity). When a user
+receives a call, the user’s phone could look up the database
+usingtheincomingcaller’snumber.However,thiswouldallow
+the server to learn who is calling the user, which is sensitive
+===== PAGE 23 =====
+[LEFT]
+information that the user may not wish to disclose to Apple.
+To enable the Live Caller ID feature without revealing the
+caller’s number to Apple, the user’s phone sends a keyword
+PIR query (the keyword is the caller’s number) to retrieve the
+identity associated with the caller’s number [2].
+B. URL Filtering
+Another application of PIR deployed by Apple is URL
+filtering[2].Inthiscase,abrowseroramobileapp(especially
+one in parental control mode or designed for children) may
+wanttoblockcertainwebsitesthatareknowntobeharmfulor
+malicious.Similarly,Apple(oranothercompany)canmaintain
+a database that maps URLs to website categories. But again,
+the user may not want to reveal to the Apple server which
+URL (legitimate or otherwise) it is visiting. PIR enables this
+feature without revealing the user’s browsing history to the
+server [2]. The browser/app can send a keyword PIR query
+(the keyword is the URL) to retrieve what type of website
+the URL corresponds to. The browser/app can then block a
+harmful URL and display a reason.
+C. Password Checkup
+Billions of user passwords have been exposed as part of
+data breaches that routinely make headlines. A user would
+like to check if his passwords have been exposed and, if so,
+choose new passwords. Some web services have compiled
+databases of exposed passwords for users to query. But it
+is a bad idea for a user to send their plaintext password to
+query such a database – this is the very act of exposing their
+password.KeywordPIRisanaturalsolutionhere(thekeyword
+is the user’s password) by allowing a user to check whether
+their password is in a database of exposed passwords without
+revealing their password to the server [6], [7].
+D. Anonymous Communication
+Anonymous communication protocols allow users to ex-
+change messages without others (such as Internet Service
+Providers) finding out that they communicated. There are
+severalproposalsforanonymouscommunicationsystems[3]–
+[5]thatusePIR.WedescribeanaturalapproachusedinAngel
+et al. [5].
+Consider a system consisting of many users who wish to
+talk to each other anonymously and an untrusted server to
+facilitate.Theprotocolproceedsinrounds.Ineachround,each
+user sends a key-value pair to the server, where the key is the
+output of a PRF and the value is a message encrypted for
+its intended recipient. Then, each user retrieves the encrypted
+messageintendedforitusingasingle-serverkeywordPIR.For
+this to work, the two users communicating need to agree on
+the PRF secret key. Readers can refer to [5] for more details.
+It is not hard to see that the server cannot link the sender and
+recipient of a message due to PIR.
+PIR has also been suggested [3] to improve the widely
+used anonymous communication system Tor [94]. At a high
+level, Tor consists of thousands of volunteer relays. Each
+user randomly selects several relays to route their network
+[RIGHT]
+23
+traffic. Each relay sees only the previous and next hops,
+so the destination of the user’s traffic remains hidden. For
+this to work, the user needs to retrieve the public keys and
+IP addresses of the relays from a Tor directory authority.
+However,iftheuseronlydownloadsinformationfortherelays
+she uses, then the directory authority can monitor the traffic
+of these relays and identify who she is communicating with.
+Currently, each user downloads the information for all relays
+(essentially a trivial PIR). Mittal et al. [3] suggest that (index)
+PIR can be used to retrieve information about the selected
+relays (such as their public keys and IP addresses) without
+revealing which relays are selected.
+XII. CONCLUSION
+Private Information Retrieval (PIR) provides a principled
+cryptographic approach for users to retrieve data from public
+databases while keeping their queries hidden from service
+providers and network observers. In this article, we surveyed
+the main design paradigms for PIR by organizing the design
+space along three key aspects: the number of servers, the
+securityassumptions,andtheuseofpreprocessing.Wepresent
+conceptuallysimpleconstructionstoconveythecoreideasand
+essential techniques underlying each paradigm. We provided
+anoverviewoftheperformancecharacteristicsofdifferentPIR
+paradigms and their trade-offs. We also described common
+applications of PIR and discussed important extensions of
+PIR, including keyword PIR and batch PIR, which are crucial
+for practical deployments where data is usually indexed by
+arbitrary strings and multiple queries naturally occur.
+PIR remains an active area of research. Further improving
+performance (both asymptotically and concretely), relaxing
+assumptions, supporting dynamic databases, developing better
+implementations, and deploying real applications all continue
+to be interesting and important research directions. We hope
+this article equips readers with a clear conceptual map of
+the PIR landscape and serves as a starting point for further
+exploration of both the theoretical foundations and practical
+systems of Private Information Retrieval.
+ACKNOWLEDGMENTS
+WethankSrinivasDevadas,DavidHeath,DavidWu,Arthur
+Lazzaretti, Joon Seo, Kevin Yeo, Ali Atiia, Benny Pinkas,
+Kabir Tomer, and anonymous reviewers for their insightful
+feedback on the article. This work is funded in part by the
+National Science Foundation award #2246386 and gifts from
+Google.
+REFERENCES
+[1] B.Chor,E.Kushilevitz,O.Goldreich,andM.Sudan,“Privateinforma-
+tionretrieval,”JournaloftheACM(JACM),vol.45,no.6,pp.965–981,
+1998.
+[2] “Combiningmachinelearningandhomomorphicencryptionintheapple
+ecosystem,” https://machinelearning.apple.com/research/homomorphic-
+encryption.
+[3] P. Mittal, F. Olumofin, C. Troncoso, N. Borisov, and I. Goldberg,
+“PIR-tor:Scalableanonymouscommunicationusingprivateinformation
+retrieval,”in20thUSENIXsecuritysymposium,2011.
+[4] A. Kwon, D. Lazar, S. Devadas, and B. Ford, “Riffle: An efficient
+communicationsystemwithstronganonymity,”ProceedingsonPrivacy
+EnhancingTechnologies,vol.2016,no.2,pp.115–134,2015.
+===== PAGE 24 =====
+[LEFT]
+[5] S. Angel and S. Setty, “Unobservable communication over fully un-
+trusted infrastructure,” in 12th USENIX Symposium on Operating Sys-
+temsDesignandImplementation(OSDI16),2016,pp.551–569.
+[6] K.Thomas,J.Pullman,K.Yeo,A.Raghunathan,P.G.Kelley,L.Inv-
+ernizzi,B.Benko,T.Pietraszek,S.Patel,D.Boneh,andE.Bursztein,
+“Protecting accounts from credential stuffing with password breach
+alerting,”in28thUSENIXSecuritySymposium,2019,pp.1556–1571.
+[7] A. Ali, T. Lepoint, S. Patel, M. Raykova, P. Schoppmann, K. Seth,
+and K. Yeo, “Communication–computation trade-offs in PIR,” in 30th
+USENIXSecuritySymposium,2021,pp.1811–1828.
+[8] A. Juels, “Targeted advertising... and privacy too,” in Cryptographers’
+TrackattheRSAConference. Springer,2001,pp.408–424.
+[9] M. Backes, A. Kate, M. Maffei, and K. Pecina, “Obliviad: Provably
+secure and practical online behavioral advertising,” in 2012 IEEE
+SymposiumonSecurityandPrivacy. IEEE,2012,pp.257–271.
+[10] M. Green, W. Ladd, and I. Miers, “A protocol for privately reporting
+ad impressions at scale,” in Proceedings of the 2016 ACM SIGSAC
+conferenceoncomputerandcommunicationssecurity,2016,pp.1591–
+1601.
+[11] T. Gupta, N. Crooks, W. Mulhern, S. Setty, L. Alvisi, and M. Wal-
+fish, “Scalable and private media consumption with popcorn,” in 13th
+USENIXSymposiumonNetworkedSystemsDesignandImplementation
+(NSDI16),2016,pp.91–107.
+[12] A.Beimel,Y.Ishai,E.Kushilevitz,andT.Malkin,“One-wayfunctions
+areessentialforsingle-serverprivateinformationretrieval,”inProceed-
+ingsofthethirty-firstannualACMsymposiumonTheoryofcomputing,
+1999,pp.89–98.
+[13] G.DiCrescenzo,T.Malkin,andR.Ostrovsky,“Singledatabaseprivate
+information retrieval implies oblivious transfer,” in International Con-
+ference on the Theory and Applications of Cryptographic Techniques.
+Springer,2000,pp.122–138.
+[14] Y. Ishai, E. Kushilevitz, and R. Ostrovsky, “Sufficient conditions for
+collision-resistant hashing,” in Theory of Cryptography Conference.
+Springer,2005,pp.445–456.
+[15] R.ImpagliazzoandS.Rudich,“Limitsontheprovableconsequencesof
+one-waypermutations,”inProceedingsofthetwenty-firstannualACM
+symposiumonTheoryofcomputing,1989,pp.44–61.
+[16] D.R.Simon,“Findingcollisionsonaone-waystreet:Cansecurehash
+functionsbebasedongeneralassumptions?”inInternationalConference
+ontheTheoryandApplicationsofCryptographicTechniques. Springer,
+1998,pp.334–345.
+[17] M. Rabin, “How to exchange secrets by oblivious transfer,” Technical
+MemoTR-81,1981.
+[18] C.Meadows,“Amoreefficientcryptographicmatchmakingprotocolfor
+useintheabsenceofacontinuouslyavailablethirdparty,”in1986IEEE
+SymposiumonSecurityandPrivacy. IEEE,1986,pp.134–134.
+[19] B. A. Huberman, M. Franklin, and T. Hogg, “Enhancing privacy
+and trust in electronic communities,” in Proceedings of the 1st ACM
+conferenceonElectroniccommerce,1999,pp.78–86.
+[20] C. Lin, Z. Liu, P. Miao, and M. Tromanhauser, “Finding balance in
+unbalanced PSI: A new construction from single-server PIR,” IACR
+CommunicationsinCryptology,vol.2,no.1,2025.
+[21] O. Goldreich and R. Ostrovsky, “Software protection and simulation
+on oblivious RAMs,” Journal of the ACM (JACM), vol. 43, no. 3, pp.
+431–473,1996.
+[22] E. Stefanov, M. v. Dijk, E. Shi, T.-H. H. Chan, C. Fletcher, L. Ren,
+X. Yu, and S. Devadas, “Path ORAM: an extremely simple oblivious
+RAMprotocol,”JournaloftheACM(JACM),vol.65,no.4,pp.1–26,
+2018.
+[23] Z.DvirandS.Gopi,“2-serverPIRwithsubpolynomialcommunication,”
+JournaloftheACM(JACM),vol.63,no.4,pp.1–15,2016.
+[24] K. Efremenko, “3-query locally decodable codes of subexponential
+length,” in Proceedings of the forty-first annual ACM symposium on
+Theoryofcomputing,2009,pp.39–44.
+[25] S.Yekhanin,“Towards3-querylocallydecodablecodesofsubexponen-
+tiallength,”JournaloftheACM(JACM),vol.55,no.1,pp.1–16,2008.
+[26] A. Beimel, Y. Ishai, E. Kushilevitz, and I. Orlov, “Share conversion
+and private information retrieval,” in 2012 IEEE 27th Conference on
+ComputationalComplexity. IEEE,2012,pp.258–268.
+[27] A. Beimel, Y. Ishai, E. Kushilevitz, and J.-F. Raymond, “Breaking
+theO(n1/(2k−1))barrierforinformation-theoreticprivateinformation
+retrieval,” in The 43rd Annual IEEE Symposium on Foundations of
+ComputerScience,2002.Proceedings. IEEE,2002,pp.261–270.
+[28] N. Gilboa and Y. Ishai, “Distributed point functions and their appli-
+cations,” in 33rd Annual International Conference on the Theory and
+[RIGHT]
+24
+Applications of Cryptographic Techniques (EUROCRYPT). Springer,
+2014,pp.640–658.
+[29] E. Boyle, N. Gilboa, and Y. Ishai, “Function secret sharing: Improve-
+mentsandextensions,”inProceedingsofthe2016ACMSIGSACConfer-
+enceonComputerandCommunicationsSecurity,2016,pp.1292–1303.
+[30] C.A.Melchor,J.Barrier,L.Fousse,andM.-O.Killijian,“XPIR:Private
+informationretrievalforeveryone,”ProceedingsonPrivacyEnhancing
+Technologies,pp.155–174,2016.
+[31] S.Angel,H.Chen,K.Laine,andS.Setty,“PIRwithcompressedqueries
+andamortizedqueryprocessing,”in2018IEEEsymposiumonsecurity
+andprivacy(SP). IEEE,2018,pp.962–979.
+[32] M. H. Mughees, H. Chen, and L. Ren, “OnionPIR: Response efficient
+single-serverPIR,”inProceedingsofthe2021ACMSIGSACConference
+onComputerandCommunicationsSecurity,2021,pp.2292–2306.
+[33] S.J.MenonandD.J.Wu,“Spiral:Fast,high-ratesingle-serverPIRvia
+FHEcomposition,”in2022IEEESymposiumonSecurityandPrivacy
+(SP). IEEE,2022,pp.930–947.
+[34] O. Regev, “On lattices, learning with errors, random linear codes, and
+cryptography,” J. ACM, vol. 56, no. 6, Sep. 2009. [Online]. Available:
+https://doi.org/10.1145/1568318.1568324
+[35] V. Lyubashevsky, C. Peikert, and O. Regev, “On ideal lattices and
+learning with errors over rings,” J. ACM, vol. 60, no. 6, Nov. 2013.
+[Online].Available:https://doi.org/10.1145/2535925
+[36] Z.Brakerski,“Fullyhomomorphicencryptionwithoutmodulusswitch-
+ingfromclassicalgapsvp,”inAdvancesinCryptology–CRYPTO2012.
+Berlin,Heidelberg:Springer,2012,pp.868–886.
+[37] J. Fan and F. Vercauteren, “Somewhat practical fully homomorphic
+encryption,” IACR Cryptology ePrint Archive, Paper 2012/144, 2012.
+[Online].Available:https://eprint.iacr.org/2012/144
+[38] Z. Brakerski, C. Gentry, and V. Vaikuntanathan, “(Leveled) fully
+homomorphic encryption without bootstrapping,” in Proceedings of
+the 3rd Innovations in Theoretical Computer Science Conference.
+New York, NY, USA: ACM, 2012, p. 309–325. [Online]. Available:
+https://doi.org/10.1145/2090236.2090262
+[39] J.H.Cheon,A.Kim,M.Kim,andY.Song,“Homomorphicencryption
+for arithmetic of approximate numbers,” in Advances in Cryptology –
+ASIACRYPT2017. Springer,2017,pp.409–437.
+[40] C. Gentry, “Fully homomorphic encryption using ideal lattices,” in
+Proceedings of the Forty-First Annual ACM Symposium on Theory of
+Computing. NewYork,NY,USA:ACM,2009,p.169–178.[Online].
+Available:https://doi.org/10.1145/1536414.1536440
+[41] E. Kushilevitz and R. Ostrovsky, “Replication is not needed: Single
+database,computationally-privateinformationretrieval,”inProceedings
+38th annual symposium on foundations of computer science. IEEE,
+1997,pp.364–373.
+[42] S.GoldwasserandS.Micali,“Probabilisticencryption,”J.Comput.Syst.
+Sci.,vol.28,pp.270–299,1984.
+[43] J. P. Stern, “A new and efficient all-or-nothing disclosure of secrets
+protocol,” in Advances in Cryptology — ASIACRYPT’98. Berlin,
+Heidelberg:Springer,1998,pp.357–371.
+[44] Y.-C. Chang, “Single database private information retrieval with loga-
+rithmiccommunication,”inInformationSecurityandPrivacy. Berlin,
+Heidelberg:Springer,2004,pp.50–61.
+[45] H.Lipmaa,“Anoblivioustransferprotocolwithlog-squaredcommuni-
+cation,” in Information Security. Berlin, Heidelberg: Springer, 2005,
+pp.314–328.
+[46] I.Damga˚rdandM.Jurik,“Ageneralisation,asimplificationandsome
+applicationsofPaillier’sprobabilisticpublic-keysystem,”inPublicKey
+Cryptography. Berlin,Heidelberg:Springer,2001,pp.119–136.
+[47] C. Cachin, S. Micali, and M. Stadler, “Computationally private infor-
+mationretrievalwithpolylogarithmiccommunication,”inInternational
+ConferenceontheTheoryandApplicationofCryptographicTechniques
+(EUROCRYPT). Springer,1999,pp.402–414.
+[48] C.GentryandZ.Ramzan,“Single-databaseprivateinformationretrieval
+with constant communication rate,” in International Colloquium on
+Automata, Languages, and Programming. Springer, 2005, pp. 803–
+815.
+[49] R. Ostrovsky and W. E. Skeith, “A survey of single-database private
+information retrieval: techniques and applications,” in Proceedings of
+the10thInternationalConferenceonPracticeandTheoryinPublic-Key
+Cryptography. Berlin,Heidelberg:Springer-Verlag,2007,p.393–411.
+[50] C.GentryandS.Halevi,“CompressibleFHEwithapplicationstoPIR,”
+inTheoryofCryptography. Springer,2019,pp.438–464.
+[51] J. Park and M. Tibouchi, “SHECS-PIR: somewhat homomorphic
+encryption-based compact and scalable private information retrieval,”
+in European symposium on research in computer security. Springer,
+2020,pp.86–106.
+===== PAGE 25 =====
+[LEFT]
+[52] M. Luo, F.-H. Liu, and H. Wang, “Faster FHE-based single-server
+private information retrieval,” in Proceedings of the 2024 on ACM
+SIGSACConferenceonComputerandCommunicationsSecurity,2024,
+pp.1405–1419.
+[53] A. Burton, S. J. Menon, and D. J. Wu, “Respire: High-rate PIR for
+databases with small records,” in Proceedings of the 2024 on ACM
+SIGSACConferenceonComputerandCommunicationsSecurity,2024,
+pp.1463–1477.
+[54] Z. Brakerski and V. Vaikuntanathan, “Efficient fully homomorphic en-
+cryptionfrom(standard)LWE,”in2011IEEE52ndAnnualSymposium
+onFoundationsofComputerScience,2011,pp.97–106.
+[55] I. Chillotti, N. Gama, M. Georgieva, and M. Izabache`ne, “TFHE:
+Fast fully homomorphic encryption over the torus,” J. Cryptol.,
+vol. 33, no. 1, p. 34–91, Jan. 2020. [Online]. Available: https:
+//doi.org/10.1007/s00145-019-09319-x
+[56] Y. Chen and L. Ren, “OnionPIRv2: Efficient single-server PIR,”
+CryptologyePrintArchive,Paper2025/1142,2025.[Online].Available:
+https://eprint.iacr.org/2025/1142
+[57] A.Beimel,Y.Ishai,andT.Malkin,“Reducingtheserverscomputation
+inprivateinformationretrieval:PIRwithpreprocessing,”in20thAnnual
+International Cryptology Conference (CRYPTO). Springer, 2000, pp.
+55–73.
+[58] W.-K.Lin,E.Mook,andD.Wichs,“Doublyefficientprivateinformation
+retrieval and fully homomorphic RAM computation from ring LWE,”
+in Proceedings of the 55th Annual ACM Symposium on Theory of
+Computing,2023,pp.595–608.
+[59] A. Henzinger, E. Dauterman, H. Corrigan-Gibbs, and N. Zeldovich,
+“Privatewebsearchwithtiptoe,”inProceedingsofthe29thSymposium
+onOperatingSystemsPrinciples. NewYork,NY,USA:ACM,2023,p.
+396–416.[Online].Available:https://doi.org/10.1145/3600006.3613134
+[60] B. Li, D. Micciancio, M. Raykova, and M. Schultz-Wu, “Hintless
+single-server private information retrieval,” in Advances in Cryptology
+– CRYPTO 2024: 44th Annual International Cryptology Conference.
+Berlin, Heidelberg: Springer-Verlag, 2024, p. 183–217. [Online].
+Available:https://doi.org/10.1007/978-3-031-68400-5 6
+[61] S. J. Menon and D. J. Wu, “YPIR: High-Throughput Single-Server
+PIR with silent preprocessing,” in 33rd USENIX Security Symposium.
+USENIXAssociation,Aug.2024,pp.5985–6002.
+[62] R. A. Mahdavi, S. Patel, J. Y. Seo, and K. Yeo, “ InsPIRe:
+Communication-Efficient PIR with Server-side Preprocessing ,” in
+2026 IEEE Symposium on Security and Privacy (SP). IEEE
+Computer Society, May 2026, pp. 1240–1259. [Online]. Available:
+https://doi.ieeecomputersociety.org/10.1109/SP63933.2026.00061
+[63] H. Chen, W. Dai, M. Kim, and Y. Song, “Efficient homomorphic
+conversion between (ring) LWE ciphertexts.” Berlin, Heidelberg:
+Springer-Verlag,2021,p.460–479.[Online].Available:https://doi.org/
+10.1007/978-3-030-78372-3 18
+[64] H. Okada, R. Player, S. Pohmann, and C. Weinert, “Towards practical
+doubly-efficient private information retrieval,” in International Confer-
+ence on Financial Cryptography and Data Security. Springer, 2024,
+pp.264–282.
+[65] E. Boyle, Y. Ishai, R. Pass, and M. Wootters, “Can we access a
+databasebothlocallyandprivately?”inTheoryofCryptography:15th
+InternationalConference. Springer,2017,pp.662–693.
+[66] R. Canetti, J. Holmgren, and S. Richelson, “Towards doubly efficient
+privateinformationretrieval,”inTheoryofCryptography:15thInterna-
+tionalConference. Springer,2017,pp.694–726.
+[67] A. Henzinger, M. M. Hong, H. Corrigan-Gibbs, S. Meiklejohn, and
+V. Vaikuntanathan, “One server for the price of two: Simple and fast
+single-server private information retrieval,” in 32nd USENIX Security
+Symposium,2023,pp.3889–3905.
+[68] A. Davidson, G. Pestana, and S. Celi, “FrodoPIR: Simple, scalable,
+single-server private information retrieval,” Proceedings on Privacy
+EnhancingTechnologies,2023.
+[69] H.Corrigan-Gibbs,A.Henzinger,andD.Kogan,“Single-serverprivate
+information retrieval with sublinear amortized time,” in Annual Inter-
+national Conference on the Theory and Applications of Cryptographic
+Techniques. Springer,2022,pp.3–33.
+[70] B.Fisch,A.Lazzaretti,Z.Liu,andC.Papamanthou,“ThorPIR:single
+server PIR via homomorphic thorp shuffles,” in Proceedings of the
+2024onACMSIGSACConferenceonComputerandCommunications
+Security,2024,pp.1448–1462.
+[71] Y. Ishai, E. Shi, and D. Wichs, “PIR with client-side preprocessing:
+information-theoreticconstructionsandlowerbounds,”inAnnualInter-
+nationalCryptologyConference. Springer,2024,pp.148–182.
+[RIGHT]
+25
+[72] S.Patel,G.Persiano,andK.Yeo,“Privatestatefulinformationretrieval,”
+inProceedingsofthe2018ACMSIGSACConferenceonComputerand
+CommunicationsSecurity,2018,pp.1002–1019.
+[73] H. Corrigan-Gibbs and D. Kogan, “Private information retrieval with
+sublinear online time,” in Annual International Conference on the
+TheoryandApplicationsofCryptographicTechniques. Springer,2020,
+pp.44–75.
+[74] K. Yeo, “Lower bounds for (batch) PIR with private preprocessing,”
+inAnnualInternationalConferenceontheTheoryandApplicationsof
+CryptographicTechniques. Springer,2023,pp.518–550.
+[75] A. Lazzaretti and C. Papamanthou, “TreePIR: Sublinear-time and
+polylog-bandwidthprivateinformationretrievalfromDDH,”inAnnual
+InternationalCryptologyConference. Springer,2023,pp.284–314.
+[76] M. Zhou, A. Park, W. Zheng, and E. Shi, “Piano: Extremely simple,
+single-server PIR with sublinear server computation,” in 2024 IEEE
+SymposiumonSecurityandPrivacy. IEEEComputerSociety,2024.
+[77] L. Ren, M. H. Mughees, and I. Sun, “Simple and practical amortized
+sublinear private information retrieval using dummy subsets,” in Pro-
+ceedings of the 2024 on ACM SIGSAC Conference on Computer and
+CommunicationsSecurity,2024,pp.1420–1433.
+[78] A. Lazzaretti and C. Papamanthou, “Single pass client-preprocessing
+private information retrieval,” in 33rd USENIX Security Symposium,
+2024,pp.5967–5984.
+[79] Z. Wang and L. Ren, “Single-server client preprocessing PIR with
+tight space-time trade-off,” in 44th Annual International Conference
+ontheTheoryandApplicationsofCryptographicTechniques. Berlin,
+Heidelberg: Springer-Verlag, 2025, p. 94–122. [Online]. Available:
+https://doi.org/10.1007/978-3-031-91095-1 4
+[80] D. Kogan and H. Corrigan-Gibbs, “Private blocklist lookups with
+checklist,”in30thUSENIXsecuritysymposium,2021,pp.875–892.
+[81] M.Zhou,W.-K.Lin,Y.Tselekounis,andE.Shi,“Optimalsingle-server
+privateinformationretrieval,”inAnnualInternationalConferenceonthe
+TheoryandApplicationsofCryptographicTechniques. Springer,2023,
+pp.395–425.
+[82] A. Lazzaretti and C. Papamanthou, “Near-optimal private information
+retrieval with preprocessing,” in Theory of Cryptography Conference.
+Springer,2023,pp.406–435.
+[83] S.Patel,J.Y.Seo,andK.Yeo,“Don’tbedense:efficientkeywordPIR
+forsparsedatabases,”in32ndUSENIXSecuritySymposium,2023,pp.
+3853–3870.
+[84] B. Chor, N. Gilboa, and M. Naor, Private information retrieval by
+keywords. Technion-IIT,DepartmentofComputerScience,1997.
+[85] S.CeliandA.Davidson,“Callmebymyname:Simple,practicalprivate
+informationretrievalforkeywordqueries,”inProceedingsofthe2024on
+ACMSIGSACConferenceonComputerandCommunicationsSecurity,
+2024,pp.4107–4121.
+[86] M.Hao,W.Liu,L.Peng,C.Zhang,P.Wu,L.Zhang,H.Li,andR.H.
+Deng,“Practicalkeywordprivateinformationretrievalfromkey-to-index
+mappings,”inProceedingsofthe34thUSENIXConferenceonSecurity
+Symposium. USENIXAssociation,2025.
+[87] Y. Ishai, E. Kushilevitz, R. Ostrovsky, and A. Sahai, “Batch codes
+and their applications,” in Proceedings of the thirty-sixth annual ACM
+symposiumonTheoryofcomputing,2004,pp.262–271.
+[88] R. Henry, “Polynomial batch codes for efficient IT-PIR.” in PoPETs
+2016,2016,pp.202–218.
+[89] M. H. Mughees and L. Ren, “Vectorized batch private information
+retrieval,” in 2023 IEEE Symposium on Security and Privacy (SP).
+IEEE,2023,pp.437–452.
+[90] A.Bienstock,S.Patel,J.Y.Seo,andK.Yeo,“BatchPIRandlabeled
+PSI with oblivious ciphertext compression,” in 33rd USENIX Security
+Symposium,2024,pp.5949–5966.
+[91] P.S.ArunachalaramananandL.Ren,“Efficientsingle-serverstatefulpir
+usingformat-preservingencryption,”CryptologyePrintArchive,2026.
+[92] ——, “Single-server stateful PIR with verifiability and balanced effi-
+ciency,”in2026IEEESymposiumonSecurityandPrivacy(SP). IEEE,
+2026,toappear.
+[93] R. Lehmkuhl, A. Henzinger, and H. Corrigan-Gibbs, “Distributional
+private information retrieval,” in Proceedings of the 34th USENIX
+ConferenceonSecuritySymposium. USENIXAssociation,2025.
+[94] R. Dingledine, N. Mathewson, and P. Syverson, “Tor: The second-
+generation onion router,” in 13th USENIX Security Symposium.
+USENIXAssociation,2004.

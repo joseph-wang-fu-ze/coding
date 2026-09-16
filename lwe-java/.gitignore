@@ -1,0 +1,16 @@
+# 编译产物
+out/
+*.class
+
+# IDEA
+.idea/workspace.xml
+.idea/tasks.xml
+.idea/usage.statistics.xml
+.idea/shelf/
+.idea/dictionaries/
+
+# javac 参数文件
+sources.txt
+
+# 自检输出
+selftest_out.txt

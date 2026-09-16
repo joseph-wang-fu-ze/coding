@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+                             http://maven.apache.org/xsd/maven-4.0.0.xsd">
+
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>cape</groupId>
+    <artifactId>lwe-java</artifactId>
+    <version>1.0-SNAPSHOT</version>
+    <packaging>jar</packaging>
+
+    <name>CAPE LWE layer</name>
+    <description>CAPE 论文同态加密部分的 LWE 层实现</description>
+
+    <properties>
+        <!-- 源码里有中文注释,必须显式指定 UTF-8,否则 Windows 默认 GBK 会乱码 -->
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <maven.compiler.source>17</maven.compiler.source>
+        <maven.compiler.target>17</maven.compiler.target>
+    </properties>
+
+    <!--
+        刻意不引入任何第三方依赖,也刻意不配置任何 plugin 版本:
+        这套代码只用 JDK 标准库(java.security.SecureRandom / java.util.Random),
+        自带 main() 做自检,不需要 JUnit。
+
+        这样 IDEA 导入时无需联网下载任何东西,秒级完成。
+        (为跑通 Maven 而下载 plugin 反而可能卡住,所以保持最小。)
+
+        目录布局遵循 Maven 标准约定:
+            src/main/java   -> 自动标为 Sources Root
+            src/test/java   -> 自动标为 Test Sources Root
+        IDEA 导入后会自己识别,不需要手动 Mark Directory as。
+    -->
+
+</project>

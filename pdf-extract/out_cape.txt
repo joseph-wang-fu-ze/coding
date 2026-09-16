@@ -1,0 +1,2600 @@
+===== PAGE 1 =====
+[LEFT]
+CAPE: Communication-Efficie
+Abstract
+Keywordprivateinformationretrieval(KeywordPIR)allows
+theclienttofetchdataentriesthatmatchaspecifickeyword
+fromtheremotepublicdatabasewhilepreservingquerypri-
+vacy.However,existingkeywordPIRschemesmainlyfocus
+on the single-keyword setting, where each query retrieves
+data associated with only one keyword. Very recently,the
+firstconjunctiveKeywordPIRscheme,BKPIR(Songetal.
+NDSS 2026),was proposed,enabling the clientto retrieve
+data entries that simultaneously match multiple keywords.
+Nevertheless,BKPIRincursprohibitivelyhighcommunica-
+tionoverhead,requiringtheclienttocommunicatetheentire
+databaseforeachquery.
+Inthispaper,wepresentCAPE,acommunication-efficient
+conjunctivekeywordPIRschemebasedonacandidate-first
+design.Ourkeyinsightistorestrictconjunctiveevaluationto
+thevaluesassociatedwithonequeriedkeywordandaggregate
+allremainingkeywordsintoasinglefixed-lengthencrypted
+Bloomquery.Thislimitstheevaluationtoasmallcandidate
+set,enablingasymptoticallyoptimalresponsesizewhilekeep-
+inguploadcostandservercomputationindependentofthe
+numberof queried keywords. Comprehensive experiments
+demonstratesubstantialimprovementsoverthestateofthe
+art,BKPIR(NDSS’26).For30keywordconjunctivequeries,
+CAPEachievesuptoan18.2×speedupwhilesignificantly
+reducingcommunicationoverhead.
+1 Introduction
+Private information retrieval (PIR) [11] allows a client to
+retrieve a record from an indexed database without reveal-
+ing any information about the target record. During the
+past decade, a wealth of research has been conducted on
+PIR [1–3,12,23,24,30–32,35,37,39,42,51,52]. Due to
+itsstrongprivacyguarantees,PIRhasbecomeakeycompo-
+nentinmanypracticalapplications,includingcontactdiscov-
+ery [5,15],anonymous communication [1,5,28,41],route
+navigation[50],andwebsearch[22].
+1
+[RIGHT]
+ent Conjunctive Keyword PIR
+Despiteitsimportance,traditionalPIRmakestheimpracti-
+calassumptionthattheclientknowstheindexofthequeryin
+thedatabase.KeywordPIR[10]extendsthisfunctionalityto
+amoreexpressivekeywordsetting,wherearequestisspeci-
+fiedbyasemanticidentifierratherthananexplicitindex.For
+instance,ChalametPIR[8]proposesagenerictransformation
+thattakestheLWE-basedschemesandkey-valuefiltersas
+inputto generate a conceptually very simple keywordPIR
+scheme. Building on this, Hao et al. [21] achieved higher
+throughputbyconstructingmoreefficientmappings.
+However,mostexistingschemesfocusonsingle-keyword
+settinganddonotmeettherequirementsofconjunctivere-
+trieval[36,46],whichcanimproveprecisionofretrieval.A
+naivewaytorealizeconjunctiveretrievalistoencodeeach
+keyword–valuepairasanindependentdatabaserecord.The
+clientinvokeskeywordPIRseparatelyforeachkeyword,re-
+trievesthecorrespondingvaluesets,thencomputestheirinter-
+sectionlocally.Thisapproach,however,duplicateskeywords
+intheencodeddatabaseandrequirestheclienttodownload
+everyqueriedvaluesetinfull,eventhoughonlytheirinter-
+sectionisultimatelyneeded.
+BKPIR[48]avoidsrepeatedretrievalbyrepresentingthe
+valuesassociatedwitheachkeywordasabinaryvaluemap
+overtheglobalvalueuniverseV andevaluatingbooleanop-
+erationsoverencryptedvaluemapsattheserver.Thismoves
+thecomputationtotheserverandavoidsdownloadingeach
+valuesetseparately.Despiteimprovedexpressiveness,their
+valuemaprepresentationandper-keywordprocessingstrategy
+bringthreedrawbackstotheconjunctivecase.
+First,eachvaluemapcontainsonepositionforeveryvalue
+inV,resultinginO(|V|)responsecommunication.Incon-
+trast,aconjunctiveresultcontainsatmostmvalues,where
+misthemaximumnumberofvaluesassociatedwithakey-
+word.AfixedO(m)responseisthereforeasymptoticallyopti-
+malandavoidsrevealingtheactualintersectionsize.Second,
+BKPIRgeneratesandprocessesoneencryptedqueryforeach
+oftheQqueriedkeywords,causingbothquerysizeandserver
+computationtogrowlinearlywithQ.Finally,thenumberof
+queried keyword is directly revealed,which exposes struc-
+1
+===== PAGE 2 =====
+[LEFT]
+Table1:Complexitycomparis
+Scheme ServerStorage QueryCost
+ChalametPIR[8] O(nm) O(n)
+√
+KPIRkvs[21] O(nm) O( n)
+MMK[48] O(nm) O(n)
+√
+FusePIR O(nm) O( n)
+FusePIR-C O(nm) O(logn)
+BKPIR[48] O(n|V|) O(Qn)
+√
+CAPE O(nm(1+ℓ )) O( n+ℓ )
+BF BF
+CAPE-C O(nm(1+ℓ )) O(logn+ℓ )
+BF BF
+Here,nisthenumberofkeywords,misthemaximumnumberofvaluesassoc
+conjunctiveterms,andℓBFistheBloom-filterlength.Theparameterwdenot
+BKPIR.ForChalametPIRandKPIRkvs,wetreatthevaluesetassociatedwit
+FrodoPIR[14]andSimplePIR[23]instantiations,respectively.The†variantsh
+selector-expansionoperationsforquerycompression.Fixedcryptographicpa
+turalinformationandmaynarrowthesetofplausiblekeyword
+combinations.ThesecurityanalysisofBKPIRcomparesonly
+querieswiththesamelogicalstructureandthusthesameQ
+intheconjunctivesetting,leavingthisleakageunaddressed.
+These limitations motivate our candidate-first design.
+Ratherthanevaluatingtheconjunctionovertheglobalvalue
+universe, we first retrieve the values associated with one
+queriedkeywordandthenfilterthesecandidatesagainstthe
+remainingkeywords.Sinceeachkeywordisassociatedwith
+at most m values,this approach restricts both the scope of
+thesearchandtheresponsetoO(m).Realizingthisdesign,
+however,raises two obstacles. First,the candidate payload
+mustberetrievedefficientlywhileremainingencryptedfor
+subsequent filtering. Existing approaches either incur sub-
+stantialretrievaloverhead[8,35,44,48]orrequireadditional
+client-sidereconstructionorselectionbeforetheresultcanbe
+usedinsubsequentcomputation[21].Second,processingthe
+remainingkeywordsseparatelywouldretaintheper-keyword
+queryandcomputationoverheadofpriorwork.
+1.1 OurContributions
+Inthispaper,wepresentCAPE,acandidate-firstconjunctive
+keyword PIR scheme that addresses the above challenges.
+CAPE achieves optimal response while keeping the query
+sizeandserver-sidecomputationindependentofthenumber
+ofqueriedkeywordsandhidingthisnumber.Torealizethis
+design,wedevelopFusePIR,anefficientmulti-valuekeyword
+PIRschemewhoseencryptedoutputcanbedirectlyusedin
+subsequent homomorphic computation. We also introduce
+query-compressedvariantstoreduceuploadcommunication.
+Table1comparesourconstructionswithpriorwork.Ourmain
+contributionsaresummarizedasfollows:
+• WeproposeFusePIR,amulti-valuekeywordPIRpro-
+tocol with homomorphically computable responses.
+2
+[RIGHT]
+sonofkeywordPIRschemes.
+ComputationCost ResponseCost QueryType
+O(nm) O(m) Single
+√
+O(nm) O(m n) Single
+O(n(m+w)) O(m) Single
+O(mn) O(m) Single
+O(mn)† O(m) Single
+O(Qn(|V|+w)) O(|V|) Boolean
+O(m(1+ℓ )n) O(m) Conjunctive
+BF
+O(m(1+ℓ )n)† O(m) Conjunctive
+BF
+ciatedwithakeyword,|V|isthenumberofdistinctvalues,Qisthenumberof
+testheHammingweightoftheconstant-weightencodingusedbyMMKand
+thakeywordasapayloadofsizeO(m);thereportedcostscorrespondtothe
+havethesameleadingasymptoticcomputationbutincuradditionalserver-side
+arametersandciphertextdimensionsareomitted.
+FusePIR combines Binary Fuse Filter encoding [18]
+with fixed-key techniques that makes the retrieved re-
+sults homomorphically computable on the serverside
+withoutadditionaldecryption.Thispropertyissufficient
+for CAPE and may also be of independent interest to
+otherapplications.
+• BuildingonFusePIR,weproposeCAPEforconjunctive
+retrieval.CAPErestrictsretrievalandevaluationtothe
+valuesassociatedwithonequeriedkeyword,achieving
+optimalresponsesize.Itfurtherrepresentstheremain-
+ingqueriedkeywordswithasinglefixed-lengthBloom
+query,keepingquerysizeandserver-sidecomputation
+constantwhilehidingthenumberofqueriedkeywords.
+Theserverevaluatesthisaggregatedqueryonceforeach
+candidate.Byreturningonlythecandidatesandtheiren-
+cryptedscores,CAPEreducestheresponsecomplexity
+fromO(|V|)toO(m).
+• Wealsointroducequery-compressedvariantswithmore
+servercomputationcostintrade-offandimplementall
+constructionsinMPC4J[20].FusePIRis4.08×–12.50×
+fasterinonlinephasethanMMK[48],themulti-value
+keywordPIR scheme underlying BKPIR. The variant
+FusePIR-Creducesitsqueryfromapproximately2305
+KBto167bytes.For30-keywordconjunctions,CAPE
+andCAPE-Cachieve18.2×and17.6×speedupsover
+BKPIR,respectively,withCAPE-Cadditionallyreduc-
+ingthequerysizebyapproximately30×.
+1.2 TechnicalOverview
+Existing keyword PIR essentially performs the conjunc-
+tive retrieval over the global value universe. In particular,
+BKPIR[48]representsthevaluesassociatedwitheachkey-
+wordasabinaryvaluemapoverV.ForaqueryK ∧···∧K ,
+1 Q
+2
+===== PAGE 3 =====
+[LEFT]
+theserverprivatelyretrievesonevaluemapforeachqueried
+keyword and homomorphically combines them to identify
+theirintersection.ThisapproachavoidsdownloadingallQ
+valuesetstotheclient,butitscostistiedtotheglobalvalue
+universe:theresponsecontainsO(|V|)positions,andboth
+querycommunicationandservercomputationgrowwithQ.
+Ourstarting pointis to avoidevaluating the conjunction
+over V altogether. Since every conjunctive result is a sub-
+setofthevaluesassociatedwitheachqueriedkeyword,we
+canfirstretrievethevaluesetofonekeyword,sayK ,and
+1
+useitsatmostmvaluesascandidates.Theremainingtaskis
+thentodeterminewhichcandidatesarealsoassociatedwith
+K ,...,K .Thiscandidate-firstformulationreducestherel-
+2 Q
+evantvaluedomainfrom|V|tom,andthereforemakesan
+O(m)responsepossible.
+Thefirstchallengeistoefficientlyretrieveallvaluesasso-
+ciatedwithonekeywordwhilekeepingtheresultencrypted
+forsubsequentcomputation.ExistingkeywordPIRschemes
+aredesignedtodeliverthequeriedvaluesanddonotsimulta-
+neouslyoptimizeforefficiencyandserver-sidecomposability.
+Equality-based schemes,such as constant-weight PIR and
+MMK[35,48],needsubstantialservercomputationbymatch-
+ingtheencryptedqueryagainsttheencodedkeywords.More
+efficientfilter-basedapproachesstillhavelimitationsforour
+purpose.Forexample,ChalametPIR[8]incurslinearquery
+size,whileKPIRkvs [21]requiresclient-sidereconstruction
+ofseparatelyretrievedfilterentries.
+Theselimitationsmotivateustoredesigntheretrievalpro-
+cesssothatthequeriedresultremainsdirectlyusablebythe
+server.Thekeydifficultyistomakeindependentlyretrieved
+componentshomomorphicallycomposable.Weaddressthis
+with a fixed-key retrieval technique,enabling the serverto
+combinethemdirectlyintoanencryptedmulti-valuepayload.
+This forms FusePIR and provides the encrypted candidate
+retrievalrequiredbyCAPE.
+Encryptedcandidateretrievalalonedoesnotremovethe
+dependenceonthenumberofqueriedkeywords.Testingeach
+candidateagainsttheremainingkeywordsseparatelywould
+stillmake querysize andservercomputation growwithQ,
+whiledirectlyrevealingthenumberofqueriedkeywords.Our
+keyobservationisthatthesemembershiptestscanbeaggre-
+gated.CAPEassociateseachcandidatewithaBloomfilter
+overits relatedkeywords andencodes allremaining query
+keywordsintoasinglefixed-lengthencryptedBloomvector.
+Theserverthenevaluatesoneencryptedscorepercandidate,
+therebycheckingallremainingquerytermsjointlywithout
+introducingper-keywordqueryorcomputationoverhead.
+InspiredbyPirouetteH[26],FusePIR-Creplacesthelarge
+RLWEone-hotselectorwithcompactLWEencryptionsofits
+coordinatesandexpandstheselectorhomomorphicallyatthe
+server.CAPE-Cinheritsthesameoptimizationforitsanchor
+retrieval.Thesevariantspreservethedatabaseencodingand
+response format,trading additional servercomputation for
+substantiallysmalleruploadcommunication.
+3
+[RIGHT]
+1.3 RelatedWork
+Private information retrieval was introduced by Chor et
+al.[11],andKushilevitzandOstrovsky[27]subsequentlyes-
+tablishedcomputationalPIRinthesingle-serversetting.Early
+constructions[16,19]mainlyreliedonnumber-theoreticho-
+momorphictechniquestoachievesublinearcommunication.
+Laterlattice-basedconstructionssubstantiallyimprovedcon-
+creteefficiencythroughpackedhomomorphiccomputation,
+batching,andrecursivedatabaseselection[1,3,37].Subse-
+quentworkfurtherexploredthetradeoffamongservercom-
+putation,queryandresponsecommunication,andrecordsize
+using techniques such as ciphertext composition,response
+packing, and ring switching [6,38,42]. A complementary
+line ofworkreduces online costthroughserver-specific or
+client-specificpreprocessing [23,39,52],while recentcon-
+structionscompressuploadcommunication usingcompact
+queries and homomorphic selector expansion [26]. These
+techniquesimprovepracticalindexPIR,butstillassumethat
+theclientknowsthephysicallocationofthedesiredrecord.
+KeywordPIR.KeywordPIR[10]addressesthislimitation
+by allowing the client to query a semantic keyword with-
+outknowingitsphysicaldatabaseindex.Existingschemes
+resolve the queried keyword through different techniques.
+Constant-weightPIR[35]performshomomorphicequality
+testingbetweentheencryptedqueryandencodeddatabase
+keywords,whereasSparsePIR[44]encodessparsedatabase
+entriesaslinearcombinationscompatiblewithstandardPIR
+optimizationssuchasrecursion.ChalametPIR[8]combines
+LWE-basedPIRwithBinaryFuseFilters[18]andrecovers
+thedesiredvaluethroughanencryptedlinearquery.Haoet
+al.[21]furtherreducekeywordPIRtoaconstantnumberof
+standardPIRinvocationsthroughcompactkeyword-to-index
+encodings,achievingsubstantiallylowercommunicationand
+improvedonlineruntime.Theschemesabovearedesigned
+forsingle-keywordretrievalandthereforecannotdirectlysup-
+portmorepreciseretrievalovermultiplequeriedkeywords.
+Building on MMK, BKPIR [48] represents the values as-
+sociatedwitheachkeywordas a valuemap overthe global
+valueuniverse.Foraconjunctivequery,theserverobtainsthe
+encryptedvaluemapselectedbyeachqueriedkeywordand
+homomorphicallyevaluatestheirelement-wiseconjunction,
+leavingonlythevaluessharedbyallqueriedkeywords.To
+thebestofourknowledge,BKPIRistheonlyexistingKPIR
+schemethatdirectlysupportsconjunctiveretrieval.Thesame
+valuemaprepresentationfurtherenablesBooleanquerieswith
+conjunction,disjunction,andnegation.
+Conjunctive Search in SSE. Conjunctive keyword re-
+trievalhasalsobeenextensivelystudiedinsearchablesymmet-
+ricencryption(SSE),althoughunderasecuritymodeldiffer-
+entfromPIR.PracticalSSEschemesachieveefficientsearch
+over encrypted databases by allowing a formally specified
+leakageprofile,whichmayincludeaccess,search,volume,or
+intersectionpatterns.Consequently,theprivacyandefficiency
+3
+===== PAGE 4 =====
+[LEFT]
+guaranteesofSSEandPIRarenotdirectlycomparable.Early
+workestablishedpracticalencryptedsingle-keywordsearch
+andformalizeditssecurity[13,47],whilestructuredencryp-
+tion and encrypted multi-maps extended the framework to
+richer data structures and query types [9]. Building on en-
+cryptedmulti-maps,Cashetal.[7]introducedOXT,thefirst
+scalableconstructionforconjunctiveretrieval.Itscentralidea
+isananchor-then-filterstrategy,inwhichtheclientfirstre-
+trievesthevaluesassociatedwiththeleastfrequentqueried
+keywordandthenteststhesecandidatesagainsttheremaining
+terms. Thiscandidate-firstdesignsubstantiallyreducesthe
+searchscope,butrevealsleakagesincludingthekeyword-pair
+resultpattern(KPRP)andtheconditionalintersectionpattern
+(IP). Subsequent work [25,29,43,49] further explores the
+tradeoffbetweenefficiencyandprivacy,progressivelyreduc-
+ingtheleakagerevealedbyOXT.Theanchor-then-filterstrat-
+egyprovidesthemainhighlevelinspirationforourscheme,
+althoughourconstructionoperatesinthePIRmodelandrelies
+ondifferentcryptographicmechanisms.
+2 Preliminaries
+In this section,we give a briefdescription ofsome crypto-
+graphicprimitivesusedthroughoutthewholepaper,suchas
+privateinformationretrievalandbloomfilter.
+2.1 Notations
+We use λ to denote the security parameter. For a positive
+$
+integer n, we write [n] = {1,...,n}. We write x ← D for
+samplingxfromD.Vectorsaredenotedbyboldlowercase
+letters,e.g.,x,andmatricesbybolduppercaseletters,e.g.,M.
+Wewritex[i]andM[i,j]fortheircorrespondingentries,and
+⟨x,y⟩fortheinnerproductoftwovectors.Forabinaryvector
+b,∥b∥ denotesitsHammingweight.Weusex∥ytodenote
+1
+concatenationandnegl(λ)todenoteanegligiblefunction.
+2.2 KeywordPrivateInformationRetrieval
+FollowingBKPIR[48],weconsiderageneralmany-to-many
+keyword-valuedatabase.LetK,V bethekeyworduniverse
+andvalueuniverse,respectively.ThedatabaseDBcontainsn
+keywordsK ,...,K ∈K,whereeachkeywordK isassoci-
+1 n i
+atedwithasetV ={v ,...,v }⊆V.Themany-to-many
+Ki i,1 i,mi
+relationshipallowsdifferentkeywordstosharethesameval-
+ues,i.e.,it is possible thatV ∩V ̸=0/ for i̸= j. We use
+Ki Kj
+m=max m to denote the maximum number of values
+i∈[n] i
+associatedwithanykeyword.
+KeywordPIRallowsaclienttoretrievethevaluesassoci-
+atedwithqueriedkeywordswithoutrevealing thequeryto
+the server. For a single-keyword query,the client inputs a
+keyword K and retrieves its associated value setV . For a
+K
+4
+[RIGHT]
+Experiment:ℓ-QINDsingle
+Π,A
+$
+1: b←{0,1}.
+2: (pp,st S ,sk)←Setup(DB).
+(0) (0) (1) (1)
+3: (K 1 ,...,K ℓ ),(K 1 ,...,K ℓ )←A(pp,st S ,DB)
+4: Q ←0/.
+5: forr=1toℓdo
+(b)
+6: (q r ,st C,r )←Query(pp,sk,K r ).
+7: Q ←Q ∪{q r }.
+8: endfor
+9: b′←A(pp,st S ,DB,Q).
+10:
+return[b′=b].
+conjunctivequeryK=(K ,...,K ),theclientretrievesthe
+1 Q
+valuessharedbyallqueriedkeywords,namely(cid:84)Q V .
+i=1 Ki
+AkeywordPIRschemeΠconsistsofthefollowingfour
+probabilisticpolynomial-time(PPT)algorithms,eachtaking
+1λasanimplicitinput:
+• Setup(DB)→(pp,st ,sk).GivenadatabaseDB,output
+S
+public parameters pp, a server state st , and a client
+S
+secretkeysk.
+• Query(pp,sk,x)→(q,st ). Given a query x,output a
+C
+client-to-serverquerymessageqandaprivateclientstate
+st .Forsingle-keywordqueries,x=K;forconjunctive
+C
+queries,x=K=(K ,...,K ).
+1 Q
+• Answer(st ,q)→resp. Given the server state and the
+S
+querymessage,outputaserverresponseresp.
+• Decode(sk,st ,resp)→R/⊥. Given the client secret
+C
+key,clientstate,andserverresponse,outputtheretrieval
+resultRorfailuresymbol⊥.
+Definition1(Correctness). Whentheclientandtheserver
+executetheprotocolfaithfully,theclientshouldrecoverthe
+valuessatisfyingthequeryexceptwithnegligibleprobability.
+Formally,akeywordPIRschemeΠhascorrectnesserrorδ(λ)
+if,foreverydatabaseDBandeveryqueryK=(K ,...,K ),
+1 Q
+ 
+(pp,st ,sk)←Setup(DB),
+S
+Q
+Pr    R= (cid:92) V Ki : ( re q s , p st ← C ) A ← ns Q w u e e r r ( y s ( t S p , p q , ) s , k,K),    ≥1−δ(λ).
+i=1
+R←Decode(sk,st ,resp)
+C
+WesaythatΠiscorrectifδ(λ)isnegligibleinλ.Asingle-
+keywordqueryisthespecialcaseQ=1.
+Definition2(IND-CKA). ForaPPTadversaryA,letPsingle
+Π,A
+denote the probability that ℓ-QINDsingle outputs 1. We say
+Π,A
+thatakeywordPIRschemeΠisIND-CKAsecure(indistin-
+guishableunderchosenkeywordattack)forsingle-keyword
+retrievalif,forallPPTadversaryA,
+(cid:12) (cid:12)
+(cid:12) (cid:12)Psingle− 1(cid:12) (cid:12)≤negl(λ).
+(cid:12) Π,A 2(cid:12)
+4
+===== PAGE 5 =====
+[LEFT]
+Experiment:ℓ-QINDconj
+Π,A
+$
+1: b←{0,1}.
+2: (pp,st S ,sk)←Setup(DB).
+(0) (0) (1) (1)
+3: (K 1 ,...,K ℓ ),(K 1 ,...,K ℓ )←A(pp,st S ,DB),
+where, for every r ∈ [ℓ] and β ∈ {0,1}, K
+(β)
+=
+r
+(cid:18) (cid:19)
+K
+(β)
+,...,K
+(β)
+.
+r,1 r,Q(
+r
+β)
+4: Q ←0/.
+5: forr=1toℓdo
+(b)
+6: (q r ,st C,r )←Query(pp,sk,K r ).
+7: Q ←Q ∪{q r }.
+8: endfor
+9: b′←A(pp,st S ,DB,Q).
+10:
+return[b′=b].
+Definition3(IND-CCKA). ForaPPTadversaryA,letPconj
+Π,A
+denote the probability that ℓ-QINDconj outputs 1. We say
+Π,A
+thata keywordPIR scheme Π is IND-CCKA secure (indis-
+tinguishableunderchosen conjunctivekeywordattack)for
+conjunctiveretrievalif,foreveryPPTadversaryA,
+(cid:12) (cid:12)
+(cid:12) (cid:12)Pconj− 1(cid:12) (cid:12)≤negl(λ).
+(cid:12) Π,A 2(cid:12)
+Thechallengequeriesmaycontaindifferentnumbersofkey-
+(0) (1)
+words;inparticular,Q andQ neednotbeequalforany
+r r
+r∈[ℓ].
+2.3 BloomFilter
+Bloom filter [4] is a compact probabilistic data structure
+for set membership testing. It consists of a bit vector b∈
+{0,1}ℓBF,initially set to zero,and h public hash functions
+g ,...,g :K →[ℓ ].Itsupportsthefollowingoperations:
+1 h BF
+• BF.Gen(b,S):ForeveryK∈S,setb[g (K)]←1forall
+j
+j∈[h],andoutputb.
+• BF.Check(b,K):Output1ifb[g (K)]=1forall j∈[h],
+j
+andoutput0otherwise.
+If K ∈ S, then BF.Check(BF.Gen(S),K) = 1; hence,
+Bloomfilterhasnofalsenegatives.IfK∈/S,thecheckmay
+stillreturn1becausedifferentelementscansetthesameposi-
+tions.Underthestandardindependent-hashassumption,the
+false-positiveprobabilityforafiltercontainingselementsis
+approximatelyε
+BF
+≈ (cid:0) 1−e−hs/ℓBF (cid:1)h .
+Moreover, for fixed Bloom filter parameters, if S ⊆S ,
+1 2
+everypositionsetinBF.Gen(S )isalsosetinBF.Gen(S ).
+1 2
+CAPEusesthispropertytocheckthenon-anchorquerykey-
+wordsagainsteachcandidate.
+5
+[RIGHT]
+2.4 BinaryFuseFilter
+BinaryFuseFilter(BFF)[18]isastaticdatastructurethat
+compactlyrepresentafixedsetbyassociatingafingerprint
+witheachelement.ABFFconsistsofanarrayandkpublic
+hashfunctions. EachelementK is mappedto k array loca-
+tions,andthearrayisconstructedsuchthatthebitwiseXOR
+oftheentriesattheselocationsequalsthefingerprintofK.
+Following[8,21],weuseanarithmeticadaptationoverZ,
+t
+whichreplacesbitwiseXORwithcomponent-wiseaddition
+modulot andtherebysupportstherecoveryofan encoded
+payloadassociatedwitheachkeyword.
+SupposethedatabasecontainsnkeywordsK ,...,K ,with
+1 n
+encodedpayloadsy ∈ZB.AnarithmeticBFFconsistsof
+Ki t
+anarrayD∈
+(cid:0)ZB(cid:1)LBFF,andkpublichashfunctionsH={h
+:
+t j
+K →[L −1]}k−1. It provides the following algorithms
+BFF j=0
+(moredetaileddescription,seeAlgorithm3):
+• BFF.Setup(n,k):ItselectsthearraylengthL ,sam-
+BFF
+ples a public seed, derives the hash functions H, and
+initializesanemptyarrayD.
+• BFF.Encode(D,H,{(K,y )}n ): It first runs S ←
+i Ki i=1
+BFF.MappingStep({K}n ,H), where S is a stack of
+i i=1
+pairs (K,p),and p ∈{h (K)}k−1 is the location as-
+i i i j i j=0
+signedtoK.Ifnovalidassignmentisfound,itrestarts
+i
+withafreshhashseed.Theprocedureinitializesallar-
+rayentrieswithrandomelementsofZB andprocesses
+t
+Sinlast-in-first-outorder.Foreachpair(K,p),where
+i i
+p ∈{h (K)}k−1,itsets
+i j i j=0
+D[p]←y − ∑ D[h (K)] (mod t).
+i Ki j i
+0≤j<k
+hj(Ki)̸=pi
+Itfinallyoutputs the completedarrayD togetherwith
+thehashfunctionsH.
+• BFF.Check(D,H,K): It evaluates the k hash func-
+tionsonK andreturnsthecorrespondingarrayentries
+(cid:0) (cid:1)
+D[h (K)],...,D[h (K)] .
+0 k−1
+• BFF.Reconstruct(D,H,K): It invokes BFF.Check to
+obtain the k array entries associated with K, denoted
+byd ,...,d ,andreturnstheircomponent-wisesum
+0 k−1
+k−1
+y← ∑d (mod t).
+j
+j=0
+For every encoded keyword K,the assignment of D[p]
+i i
+ensures that ∑ k j= − 0 1D[h j (K i )] = y Ki (mod t). Therefore,
+BFF.Reconstruct(D,H,K)=y . Thus, reconstruction re-
+i Ki
+quireskarrayaccessesandk−1component-wiseadditions
+over Z. For a keyword that was not encoded, the recon-
+t
+structedvectormaybearbitrary.Wethereforeprependafin-
+gerprintofK toeachencodedpayloadandaccepttheresult
+i
+5
+===== PAGE 6 =====
+[LEFT]
+onlyiftherecoveredfingerprintmatchesthequeriedkeyword.
+Themappingandarrayassignmentproceduresaredetailedin
+AppendixA.
+2.5 HomomorphicEncryption
+Our constructions use lattice-based homomorphic encryp-
+tion to perform private selection and filtering without de-
+crypting intermediate results. We use LWE, RLWE, and
+RGSW[17,33,34,45]ciphertexts,togetherwithseveralstan-
+dardhomomorphicoperationsandconversionprocedures.We
+reviewonlytheprimitivesrequiredbyourconstructions.
+Let t and q denote the plaintext and ciphertext moduli,
+respectively, and let d denote the LWE dimension. For a
+power-of-twopolynomialdegreeN,defineR =Z[X]/(XN+
+t t
+1),R =Z [X]/(XN+1).
+q q
+LWEciphertexts.AnLWEsecretkeyisavectors∈Zd.
+q
+To encrypta message m,sample a← $ Zd anda smallerror
+q
+e, and compute ct =(a,b), where b=⟨a,s⟩+∆m+e
+LWE
+(mod q), ∆ is a scaling factor determined by the plaintext
+encoding.Wewrite
+ct ←LWE.Enc (m).
+LWE s
+Correct decryption recovers m as long as the accumulated
+errorremainsbelowthedecodingbound.
+RLWE ciphertexts. RLWE extends LWE from vectors
+over Z to polynomials over R . An RLWE secret key is
+q q
+s∈R . To encrypta plaintextpolynomialm(X)∈R,sam-
+q t
+$
+plea(X)←R andasmallerrorpolynomiale(X),andform
+q
+ct =(a(X),b(X)),whereb(X)=a(X)s(X)+∆m(X)+
+RLWE
+e(X) (mod q).Wewrite
+ct ←RLWE.Enc (m(X)).
+RLWE s
+As withLWE,correctdecryption recovers m(X) whenever
+thenoiseremainswithinthecorrectnessbound.
+RGSWciphertexts.RGSWextendsRLWEwithagadget
+representationthatenablesefficientmultiplicationbetweenan
+encryptedcontrolvalueandanRLWEciphertext.LetGde-
+notethepublicgadgetmatrixdeterminedbyadecomposition
+base. AnRGSWencryptionofamessageµcanbeviewed
+asamatrixofRLWEciphertextsoftheformC =Z+µG
+µ
+(mod q),whereZconsistsofRLWEencryptionsofzeroun-
+dersecretkeys.Wewrite
+C ←RGSW.Enc (µ).
+µ s
+Inourconstructions,µ∈{0,1},soanRGSWciphertext
+servesasanencryptedselectorbit.Itsgadgetstructureallows
+theencryptedbittobemultipliedwithanRLWEciphertext
+withoutfirstdecrypting eitheroperand. RGSW ciphertexts
+are used internally by blind rotation and explicitly by the
+query-compressedvariantsforselectorexpansion.
+6
+[RIGHT]
+Homomorphicoperations.Homomorphicencryptionsup-
+portscomputationdirectlyoverciphertexts.Weusethefol-
+lowingbasicoperations:
+CtCtAdd(ct ,ct )→Enc(m +m ),
+0 1 0 1
+CtPtMul(ct ,m )→Enc(m m ),
+0 1 0 1
+CtCtMul(ct ,ct )→Enc(m m ),
+0 1 0 1
+CtRotate(ct,i)→Enc(Rot(m,i)).
+ThefirsttwooperationsareusedextensivelyinFusePIRfor
+encryptedselectionandreconstruction.CAPEadditionally
+usesciphertext–ciphertextmultiplicationandrotationtoeval-
+uateencryptedBloomscores.
+FHEsubroutines.Basedontheaboveciphertextrepresen-
+tationsandhomomorphicoperations,weusethefollowing
+standardFHEsubroutines.Thecorrespondingpublicevalua-
+tionkeysareomittedfromthenotationwhentheyareclear
+fromcontext.
+• BlindRotate(ct ,ct )→ct′:GivenaLWEencryption
+L R R
+ct ←LWE.Enc (r)andanRLWEencryptionofanac-
+L s
+cumulator P(X)=∑ N
+i=
+−
+0
+1p
+i
+Xi,it homomorphically ro-
+tatestheaccumulatoraccordingtotheencryptedindex
+r,suchthat p ismovedtothedesignatedcoefficientof
+r
+ct′,whichwetaketobetheconstantcoefficient.
+R
+• SampleExtract (ct )→ct : Given an RLWE encryp-
+j R L
+tionct R ←RLWE.Enc s (cid:0) ∑ N i= − 0 1m i Xi(cid:1) ,itextractsthe j-th
+coefficientandoutputsct ←LWE.Enc (m ).Whennec-
+L s j
+essary,thenotationincludeskeyswitchingtotheLWE
+keyusedbythesubsequentcomputation.
+• Pack({ct })→{ct } :GivenacollectionofLWE
+L,i i R,β β
+ciphertexts ct ← LWE.Enc (m), it packs their en-
+L,i s i
+cryptedmessagesintooneormoreRLWEciphertexts
+underthecorrespondingRLWEkey.
+• LWEtoRGSW(ct )→C : Given ct ←LWE.Enc (µ)
+L µ L s
+forµ∈{0,1},itoutputsC ←RGSW.Enc (µ),convert-
+µ s
+ingtheencryptedbitintotheRGSWrepresentationused
+forselectorexpansioninthequery-compressedvariants..
+3 ComposableMulti-ValueKeywordPIR
+FusePIR provides efficient multi-value keyword retrieval
+while keeping encrypted values that can be directly used
+insubsequentcomputation.ForaqueriedkeywordK,itre-
+trievesafixed-lengthencryptionoftheassociatedvalueset
+V ,paddedtothepubliccapacitym.Figure1illustratesthe
+K
+mainidea,andAlgorithm1givesthecompleteprotocol.
+6
+===== PAGE 7 =====
+[LEFT]
+Setup
+Padding
+Keyword-Values A
+Database
+Client Query Server Answer
+1 2
+BlindRotate
+Figure1:OverviewofFusePIR.ForthequeriedkeywordK,the
+i
+TheserverretrievesthecorrespondingcolumnsandappliesBli
+entriestotheconstantcoefficient.Thethreeresultingciphertext
+ofPayload.
+i
+3.1 Construction
+FusePIRfollowsthesingle-keywordPIRsyntaxdefinedin
+Section2.2.WeinstantiatethearithmeticBFFwiththreepo-
+sitionfunctionsandusethesamepairofHEkeysthroughout
+thethreeretrievalpaths.
+Encoding.ForeachkeywordK,theserverformsafixed-
+i
+lengthpayloadcontainingitsfingerprint,thenumberofasso-
+ciatedvalues,andthevaluesetpaddedtom.Thefingerprint
+identifiesinvalidreconstruction,whilepaddingensuresthat
+therepresentationandresponselengthdonotdependonthe
+numberofvaluesassociatedwiththequeriedkeyword.
+The keyword–payload pairs are then encoded using the
+BFFofSection2.4,withthreepositionsassignedtoeachkey-
+word.Wefurtherrepresentthearrayintoatwo-dimensional
+layout and pack each column into polynomial coefficients.
+Thisdesignallowstheservertoselectthetargetcolumnho-
+momorphicallyandthenextractthedesiredentryusingthe
+encryptedrowindex.
+QueryandAnswer.Theclientgeneratesencryptedrow
+and column selectors for the three BFF positions of K
+(Lines 2–6 of QUERY in Algorithm 1). The server evalu-
+atesthethreeselectionsoverthepackedBFFrepresentation
+andobtainsthecorrespondingencryptedentries(Lines2–9
+ofANSWER).AllthreeselectionsusethesameHEkeys,al-
+lowingtheselectedentriestobeaddeddirectlyattheserver
+(Lines10–12).BytheBFFreconstructionproperty,theirsum
+encryptsthecompletepayloadassociatedwithK.Theresult
+isthenpackedandreturnedtotheclient.
+Decoding.Theclientdecryptstheresponseandverifiesthe
+7
+[RIGHT]
+p
+Encoding
+Arithmetic BFF
+Client Decode
+3 4 5
++
+eclientgeneratesencryptedqueriesforthethreeBFFpositions.
+indRotatewiththeencryptedrowindices,movingtheselected
+tsarethenhomomorphicallyaddedtoreconstructanencryption
+embeddedfingerprint.Amismatchresultsin⊥;otherwise,
+theencodedvaluecountdeterminesthereturnedsetV .The
+K
+encryptedpayloadobtainedduringANSWERcanalsobeused
+directlybythesubsequentcomputationinCAPE.
+Query-compressed variant. FusePIR-C preserves the
+database representation and encrypted reconstruction of
+FusePIR,butreplacesitsone-hotRLWEselectorswithcom-
+pactLWEencryptionsofthecorrespondingcoordinates.The
+serverexpandsthesecompactquerieshomomorphicallybe-
+foreexecutingthesameretrievalprocedure.FusePIR-Cthere-
+fore trades additional server computation for substantially
+smalleruploadcommunication. Itsdetailedconstructionis
+giveninAppendixB.
+3.2 CorrectnessandSecurity
+WenowshowthatFusePIRsatisfiesthecorrectnessandse-
+curity definitions of Section 2.2. Full proofs are given in
+AppendixD.
+Theorem1(Correctness). Assumingthecorrectnessofthe
+BFFconstructionandtheunderlyinghomomorphicencryp-
+tion procedures, the construction FusePIR in Algorithm 1
+achievescorrectness.
+Proofsketch.ForeachofthethreeBFFpositionsofaqueried
+keywordK,theencryptedcolumnselection,blindrotation,
+and sample extraction recover an encryption of the corre-
+spondingentryD[h (K)].Sinceallthreeretrievalpathsuse
+a
+compatible keys, these ciphertexts can be added directly.
+By the BFF reconstruction property, ∑2
+a=0
+D[h
+a
+(K)] = y
+K
+7
+===== PAGE 8 =====
+[LEFT]
+Algorithm1FusePIR
+SETUP(1λ,DB={Ki(cid:55)→VKi ={vi,1,...,vi,mi }}n
+i=1
+)
+1: (D,H,fp)←BFF.Setup(n,3).
+2: LBFF←|D|,m←max
+i∈[n]
+|VKi |.
+3: Selectpublicparameters(N,d,t,q),andgenerateHEkeyssk=(sL,sR).
+4: SelectR,CsuchthatRC≥LBFF,R≤N.
+5: fori=1tondo
+6: PadVKi tomvaluesandsetyKi ←fp(Ki)∥mi∥vi,1∥···∥vi,m∈Z
+t
+Bpay.
+7: endfor
+8: (D,H)←BFF.Encode (cid:0) D,H,{(Ki,yKi )}n
+i=1
+(cid:1) .
+9: foru=LBFFtoRC−1do
+10:
+D[u]←0∈ZBpay.
+t
+11: endfor
+12: forc=0toC−1do
+13: forb=1toBpaydo
+14: Pc,b(X)←∑R
+r=
+−
+0
+1D[r+cR][b]Xr.
+15: endfor
+16: endfor
+17: pp←(H,fp,R,C,N,d,t,q).
+18: stS←({Pc,b}c,b,pp).
+19: return(pp,stS,sk).
+QUERY(pp,sk,K)
+1: q←[].
+2: fora=0to2do
+3: ua←ha(K), ra←uamodR, ca←⌊ua/R⌋.
+4 5 : : e q c a a = ← (q (0 c a o , l . , . q . r a , o 0 w , ) 1, = 0, (cid:0) . R .. L , W 0) E ∈ .E { n 0 c ,1 sR } ( C e , ca w ) i , t L h W th E e . 1 En at c i s n L ( d r e a x ) (cid:1) c . a.
+6: endfor
+(mod t),sotheclientrecoverstheencodedpayloadandhence
+V . The remaining failure events arise from BFF construc-
+K
+tionandtheunderlyinghomomorphicoperations;theircom-
+bined probability is negligible. The full proof is given in
+AppendixD.1.
+Theorem2(Security). AssumingtheIND-CPAsecurityof
+theunderlyingLWEandRLWEencryptionschemes,FusePIR
+isIND-CKAsecureforsingle-keywordretrieval.
+Proofsketch.Intheℓ-queryexperimentofDefinition2,the
+challenge-dependentpartofeachFusePIRqueryconsistsof
+the encrypted column and row selectors for the three BFF
+positions. We considera standard hybrid argument that re-
+placesthesechallengeciphertextsoneatatime.Replacing
+acolumnselectorisindistinguishablebyRLWEIND-CPA
+security,whilereplacingarowselectorisindistinguishableby
+LWEIND-CPAsecurity.Sincethehybridsequencecontains
+onlypolynomiallymanytransitions,thetotaldistinguishing
+advantageremainsnegligible.Thus,
+(cid:12) (cid:12)
+(cid:12) (cid:12)Psingle− 1(cid:12) (cid:12)≤negl(λ).
+(cid:12) Π,A 2(cid:12)
+ThefullhybridargumentappearsinAppendixD.2.
+4 CAPE:ConjunctiveKeywordPIRwithEn-
+cryptedBloomScores
+CAPE extends FusePIR to conjunctive queries K =
+(K ,...,K ).ItusesK astheanchorkeywordandrestricts
+1 Q 1
+8
+[RIGHT]
+7: q:=(q0,q1,q2),stC←K.
+8: return(q,stC).
+ANSWER(stS,q)
+1: ParsestS=({Pc,b}c,b,pp).
+2: fora=0to2do
+3: Parse(qcol,qrow)fromq.
+a a
+4: forb=1toBpaydo
+5: Acca,b←∑C
+c=
+−
+0
+1CtPtMul(qc
+a
+ol[c],Pc,b(X)).
+6: Acc′
+a,b
+←BlindRotate(qr
+a
+ow,Acca,b).
+7: cta,b←SampleExtract
+0
+(Acc′
+a,b
+).
+8: endfor
+9: endfor
+10: forb=1toBpaydo
+(cid:0) (cid:1)
+11: ctpay,b←CtCtAdd CtCtAdd(ct 0,b,ct 1,b),ct 2,b .
+12: endfor
+13: resp←Pack({ctpay,b} B
+b=
+pa
+1
+y).
+14: returnresp.
+DECODE(sk,stC,resp)
+1: K←stC.
+2: foreachpackedciphertextct ∈respdo
+pay,β
+3: y[β]←DecsR (ct
+pay,β
+).
+4: endfor
+5: Recover(f,mK,v1,...,vm)←y.
+6: if f̸=fp(K)then
+7: return⊥.
+8: endif
+9: return{v1,...,vmK }.
+1 1 1 1 1 1 1 1 0 1 1 1 1 1 0 1
+Figure2:Bloom-filtermembershiptestinCAPE.Thecan-
+didate Bloom filter contains the positions contributed by
+K ,K ,K .Forthequeryset{K ,K }(left),allrequiredposi-
+1 2 3 2 3
+tionsareset,yieldings=τ.For{K ,K }(right),atleastone
+2 4
+requiredpositionisunset(red),yieldings<τandrejecting
+thecandidate.
+thesubsequentevaluationtotheatmostmvaluesassociated
+withK .EachcandidatevalueisaugmentedwithaBloomfil-
+1
+terdescribingthekeywordsassociatedwiththatvalue.There-
+mainingquerykeywordsK ,...,K arerepresentedbyasin-
+2 Q
+glefixed-lengthencryptedBloomvector,allowingtheserver
+toevaluatethemjointlyforeveryanchorcandidate.
+4.1 Construction
+CAPEfollowstheconjunctivekeywordPIRsyntaxofSec-
+tion2.2andreusesFusePIRforencryptedanchorretrieval.
+ThemainadditionalcomponentisaBloomfilterassociated
+witheachdatabasevalue.Itsproceduralspecificationisgiven
+8
+===== PAGE 9 =====
+[LEFT]
+Algorithm2CAPE
+(cid:16) (cid:17)
+SETUP 1λ,DB={Ki(cid:55)→VKi ={vi,1,...,vi,mi }}n
+i=1
+1: SelectpublicBloom-filterparametersℓBFandG={g1,...,gh}.
+3 2 : : f m or ← ea m ch ax v i∈ ∈ [n (cid:83) ] |V n i= K 1 i | V . Ki do
+4: Sv←{Ki:v∈VKi }.
+5: bv←BF.Gen(0,Sv).
+6: endfor
+7: fori=1tondo
+8: V
+K
+C
+i
+APE←{(vi,j,bvi,j )}m
+j=
+i
+1
+.
+9: endfor
+10: DBCAPE←{Ki(cid:55)→V
+K
+C
+i
+APE}n
+i=1
+.
+11: (pp
+F
+,stF
+S
+,sk)←FusePIR.Setup(1λ,DBCAPE).
+12: pp←(pp
+F
+,ℓBF,G,m).
+13: stS←stF
+S
+.
+14: return(pp,stS,sk).
+QUERY(pp,sk,K=(K1,...,KQ))
+1: (qanc,st
+C
+anc)←FusePIR.Query(pp
+F
+,sk,K1).
+2: bqry←BF.Gen(0,{K2,...,KQ}).
+3: τ←∥bqry∥1.
+4: qBF←RLWE.EncsR (bqry).
+5: q←(qanc,qBF).
+6: stC←(st
+C
+anc,τ).
+7: return(q,stC).
+inAlgorithm2.
+Encoding. We use a public Bloom-filter length ℓ =
+BF
+ℓ(n,ε ),determinedbythenumberofkeywordsnandthe
+BF
+target false-positive probability ε . For each value v, the
+BF
+server constructs a Bloom filter over all keywords associ-
+ated with v. Each keyword payload then pairs every value
+withitscorrespondingBloomfilterbeforebeingencodedby
+FusePIR.AllBloomfiltersandqueryBloomvectorsharethe
+samelengthℓ ,ensuringthattheencryptedBloomscorecan
+BF
+be evaluatedthroughhomomorphicinnerproducts. Conse-
+quently,retrievingthepayloadofananchorkeywordyields
+notonlyitscandidatevaluesbutalsoencryptedmembership
+informationforevaluatingthesecandidatesagainstremaining
+querykeywords.
+QueryandAnswer.Foraquery(K ,...,K ),theclient
+1 Q
+usesFusePIRtoquerytheanchorkeywordK .Ratherthan
+1
+generatingaseparatemembershipqueryforeveryremaining
+keyword,itinsertsK ,...,K intooneBloomfilteranden-
+2 Q
+cryptstheresultingfixed-lengthvector.ItsHammingweight
+τisretainedlocallyastheacceptancethreshold.Afterrecon-
+structingtheencryptedanchorpayload,theservercompares
+this encrypted query representation with the Bloom filter
+attached to each candidate. The comparison produces one
+encryptedscorepercandidate,measuringhowmanyquery
+positions are present in the candidate filter. As illustrated
+in Figure 2,a matching candidate reaches the threshold τ,
+whereasanymissingrequiredpositiongivesasmallerscore.
+Only the encrypted candidate values and these scores are
+returnedtotheclient.
+Decoding.Theclientfirstverifiesanddecodestheanchor
+payloadasinFusePIR.Itthendecryptsthecandidatescores
+9
+[RIGHT]
+ANSWER(stS,q)
+1: Parse(qanc,qBF)fromq.
+2: resp
+anc
+←FusePIR.Answer(stS,qanc).
+3: Parse{(ctvj ,ctB
+j
+F)}m
+j=1
+fromresp
+anc
+.
+4: ctscore,j←CtCtMul(qBF,ctB
+j
+F).
+6 5 : : for c r t = sco 0 re t , o j← log C 2 ℓ tC BF tA − d 1 d (cid:0) d c o tscore,j,CtRotate(ctscore,j,2r) (cid:1) .
+7: endfor
+8: resp← (cid:0) {ctvj ,ctscore,j}m
+j=1
+(cid:1) .
+9: returnresp.
+DECODE(sk,stC,resp)
+1: Parse(st
+C
+anc,τ)fromstC,(resp
+anc
+,{ctscore,j}m
+j=1
+)fromresp.
+2: VK1 ←FusePIR.Decode(sk,st
+C
+anc,resp
+anc
+).
+3: ifVK1 =⊥then
+4: return⊥.
+5: endif
+6: R←0/.
+7: for j=1to|VK1 |do
+8: sj←DecsR (ctscore,j).
+9: ifsj=τthen
+10: R←R∪{vj}.
+11: endif
+12: endfor
+13: returnR.
+andretainsthoseequaltothelocallystoredthresholdτ.
+Query-compressedvariant.AppendixCpresentsCAPE-C,
+whichreplaces the FusePIR anchorquerywithFusePIR-C
+whilepreservingtheencryptedBloomquery,Bloom-score
+computation,andresponseformatofCAPE.
+4.2 CorrectnessandSecurity
+WenowshowthatCAPEsatisfiesthecorrectnessandsecurity
+definitionsofSection2.2.
+Theorem 3 (Correctness). Assuming the correctness of
+FusePIR and the underlying homomorphic evaluation pro-
+cedures,andassumingnegligibleBloomfilterfalse-positive
+probability,theconstructionCAPEinAlgorithm2achieves
+correctnessforconjunctivekeywordretrieval.
+Proofsketch.ByTheorem1,CAPEcorrectlyobtainstheen-
+cryptedcandidatesassociatedwiththeanchorkeywordK ,
+1
+exceptwithnegligibleprobability.Foreachcandidatev ,the
+j
+decrypted Bloom score is s =⟨b ,b ⟩,and τ=∥b ∥ .
+j qry j qry 1
+Since both vectors are binary,s ≤τ. If v ∈(cid:84)Q V ,the
+j j i=1 Ki
+no-false-negative property of Bloom filters implies s =τ.
+j
+Conversely,s <τcertifiesthatatleastonerequiredBloom
+j
+positionisabsent,sov isrejected.Anon-matchingcandidate
+j
+cansatisfys =τonlythroughBloomfilterfalsepositives.
+j
+Acrossatmostmcandidates,thiseventhasnegligibleprob-
+abilityunderthechosenBloomfilterparameters. Together
+withthenegligibleerrorsofFusePIRandthehomomorphic
+evaluation,CAPEsatisfiesDefinition1.Thedetailedanalysis
+isgiveninAppendixD.3.
+9
+===== PAGE 10 =====
+[LEFT]
+Theorem4(Security). AssumingthatFusePIRisIND-CKA
+secureandthattheunderlyingRLWEencryptionschemeis
+IND-CPAsecure,CAPEisIND-CCKAsecureforconjunctive
+keywordretrieval.
+Proofsketch.ACAPEqueryconsistsofaFusePIRanchor
+queryandoneRLWEciphertextencryptingthefixed-length
+Bloomvectorofallnon-anchorkeywords.Wefirstreplace
+theanchorqueriesusingtheIND-CKAsecurityofFusePIR
+andthenreplacetheencryptedBloomqueriesusingtheIND-
+CPAsecurityofRLWE.Astandardhybridargumenttherefore
+makesthetwochallengetranscriptscomputationallyindistin-
+guishable.
+Moreover,the Bloom filterciphertext has the same pub-
+licformatregardlessofthenumberofnon-anchorkeywords,
+whilethethresholdτremainsintheprivateclientstate.Hence,
+theargumentalsoholdswhenthetwochallengequeriescon-
+taindifferentnumbersofkeywords.Therefore,
+(cid:12) (cid:12)
+(cid:12) (cid:12)Pconj− 1(cid:12) (cid:12)≤negl(λ),
+(cid:12) Π,A 2(cid:12)
+as required by Definition 3. The full proof is given in Ap-
+pendixD.4.
+5 ImplementationandEvaluation
+WeimplementFusePIR,CAPE,andtheirquery-compressed
+variantsFusePIR-CandCAPE-CintheMPC4J[20]frame-
+workwithnativehomomorphicencryptionroutines.Wereport
+offlinepreprocessingtime,onlineservertime,querycommu-
+nication,andresponsecommunication.MMK[48]isusedas
+thesingle-keywordbaseline,whileBKPIR[48]isusedfor
+conjunctiveretrieval.
+5.1 ExperimentalSetup
+OurimplementationusesMicrosoftSEAL[40]withtheBFV
+homomorphicencryptionscheme.Wesettheplaintextmodu-
+lustot=65537andusethedefaultconfigurationinSEALto
+achieve128-bitsecurity.Thedegreeofthepolynomialmod-
+ulus is N =16384. The BFF uses three hash positions per
+keywordandthefingerprintlengthis40bits.ForBloomfilters
+usedinCAPEandCAPE-C,wefixtheBloomfilterparame-
+terswithineachexperimentsothattheencryptedBloomquery
+hadafixedlength.Forconjunctiveexperiments,wesetthe
+false-positiveprobabilityoftheBloomfiltertoε =2−20.
+BF
+All experiments are conducted on a machine running
+Ubuntu22.04.5LTSwithLinuxkernel6.8.0.Themachine
+has an IntelCore i9-14900K CPU and62 GiB ofmemory.
+ThesoftwareenvironmentusesOpenJDK17.0.19,Apache
+Maven3.6.3,GCC/G++11.4.0,andCMake3.22.1.
+Wegeneratemulti-valuekeyworddatabases.Aconfigura-
+tiondenotedbyn×m×ℓ -bitcontainsnkeywords,where
+V
+eachkeywordisassociatedwithmvaluesandeachvaluehas
+1
+[RIGHT]
+bit length ℓ . We report preprocessing time,online server
+V
+time,querysize,andresponsesize.Forconjunctiveretrieval,
+weadditionallyvarythenumberofqueriedkeywordsQ.
+5.2 Single-KeywordRetrieval
+We evaluate MMK, FusePIR, and FusePIR-C over n ∈
+{128,256,512},m∈{213,214,215},andvaluelengthsfrom
+16to1024bits. Table2summarizesbothsetupandonline
+performance.
+Preprocessingtime.MMKconsistentlyhasthelowestpre-
+processing cost,whereas FusePIR incurs additionaloffline
+overheadfromconstructingthearithmetic-BFFrepresenta-
+tionofthemulti-valuepayloads.FusePIR-Ccloselyfollows
+FusePIR,withonlyasmalladditionalcostassociatedwiththe
+query-compression setup. Forshortvalues,the preprocess-
+ingtimeofbothFusePIRvariantsremainsrelativelystable
+as n and m increase. As the value length grows, however,
+theenlargedpayloadmakestheeffectofdatabasesizemore
+pronounced,particularlyforlargerm.Overall,FusePIRand
+FusePIR-Ctradehigherofflinepreprocessingfortheironline
+computationandcommunicationbenefits,whilequerycom-
+pressionintroduceslittleadditionalpreprocessingoverhead.
+Onlineperformance.FusePIRachievestheshortestonline
+servertimethroughouttheevaluation,outperformingMMK
+by4.08×–12.50×.Asthepayloadincreases,theperformance
+gap typically widens,reflecting the advantage of avoiding
+homomorphic keyword matching on the encoded database
+andinsteaddirectlyretrievingthedesiredBFFentries.
+FusePIR-Cintroducesadditionalserver-sidecomputation
+forexpandingthecompressedquery,andistherefore3.20×–
+5.52×slowerthanFusePIR.Evenwiththisadditionalcost,
+FusePIR-CremainsfasterthanMMKinalmostallevaluated
+settings.TheseresultsshowthatFusePIRfavorsonlinecom-
+putationefficiency,whereasFusePIR-Cshiftspartofthisgain
+towardreducingquerycommunication.
+Querycommunication.Thequerysizeisessentiallyindepen-
+dentofmandthevaluelength.MMKrequiresapproximately
+768.25KiB,whileFusePIRusesapproximately2304.97KiB
+duetoitsthreeencryptedselections.FusePIR-Creducesthe
+query to about 0.16KiB,corresponding to more than four
+ordersofmagnitudereductionrelativetoFusePIR.
+5.3 ConjunctiveRetrieval
+WenextevaluateBKPIR,CAPE,andCAPE-Cforconjunctive
+retrieval.Weconsidern∈{128,256,512},m∈{29,210,211},
+and Q ∈ {3,5,10,20,30}. All values are 16 bits, and the
+globalvalueuniverseofBKPIRissetto|V|=64m.Table3
+reportsthecompletesetupandonlinemeasurements.
+Preprocessing time. BKPIR has the lowest preprocessing
+cost,whereasCAPErequiresadditionalofflineworktocon-
+structthe Bloom filters and encode the enlarged candidate
+payloads. CAPE-C remains close to CAPE, showing that
+10
+===== PAGE 11 =====
+[LEFT]
+Table2:Setupandonlineperform
+16-bitand64-bit
+Parameter Setup Online
+Scheme
+ValueLen. n m Prep.(s) QueryTime(s) QuerySize(KiB)
+MMK 3.64 43.75 768.25
+213 FusePIR 23.08 7.26 2304.97
+FusePIR-C 25.50 40.08 0.16
+MMK 3.47 43.48 768.25
+128 214 FusePIR 24.04 10.65 2304.97
+FusePIR-C 26.85 54.49 0.16
+MMK 3.62 86.30 768.25
+215 FusePIR 24.34 17.53 2304.97
+FusePIR-C 27.95 71.44 0.16
+MMK 3.98 87.36 768.25
+213 FusePIR 23.76 10.61 2304.97
+FusePIR-C 26.64 48.48 0.16
+MMK 3.85 86.34 768.25
+16-bit 256 214 FusePIR 24.70 15.73 2304.97
+FusePIR-C 26.81 65.16 0.16
+MMK 4.00 172.60 768.25
+215 FusePIR 24.77 25.90 2304.97
+FusePIR-C 27.37 98.80 0.16
+MMK 4.72 175.59 768.25
+213 FusePIR 24.15 14.05 2304.97
+FusePIR-C 26.26 71.59 0.16
+MMK 4.57 172.49 768.25
+512 214 FusePIR 24.78 22.62 2304.97
+FusePIR-C 27.14 96.75 0.16
+MMK 4.91 345.94 768.25
+215 FusePIR 27.50 38.54 2304.97
+FusePIR-C 31.01 171.06 0.16
+MMK 3.67 88.09 768.25
+213 FusePIR 30.79 19.33 2304.97
+FusePIR-C 33.64 77.28 0.16
+MMK 3.80 176.16 768.25
+128 214 FusePIR 25.01 34.78 2304.97
+FusePIR-C 28.39 113.36 0.16
+MMK 4.18 349.65 768.25
+215 FusePIR 25.50 53.92 2304.97
+FusePIR-C 29.27 214.03 0.16
+MMK 4.16 175.02 768.25
+213 FusePIR 25.48 27.49 2304.97
+FusePIR-C 28.82 98.86 0.16
+MMK 4.45 349.22 768.25
+64-bit 256 214 FusePIR 25.46 44.39 2304.97
+FusePIR-C 29.13 152.88 0.16
+MMK 5.15 695.74 768.25
+215 FusePIR 25.94 83.64 2304.97
+FusePIR-C 28.40 299.58 0.16
+MMK 5.04 352.19 768.25
+213 FusePIR 25.11 37.90 2304.97
+FusePIR-C 27.83 170.87 0.16
+MMK 5.72 706.99 768.25
+512 214 FusePIR 26.84 75.51 2304.97
+FusePIR-C 30.81 303.52 0.16
+MMK 7.05 1402.60 768.25
+215 FusePIR 28.24 136.93 2304.97
+FusePIR-C 32.19 568.69 0.16
+1
+[RIGHT]
+manceforsingle-keywordretrieval.
+256-bitand1024-bit
+Parameter Setup Online
+Scheme
+ValueLen. n m Prep.(s) QueryTime(s) QuerySize(KiB)
+MMK 4.20 349.77 768.25
+213 FusePIR 25.33 53.49 2304.97
+FusePIR-C 29.00 214.16 0.16
+MMK 4.83 698.94 768.25
+128 214 FusePIR 26.57 102.58 2304.97
+FusePIR-C 29.12 396.41 0.16
+MMK 6.31 1394.63 768.25
+215 FusePIR 29.23 202.10 2304.97
+FusePIR-C 32.41 759.83 0.16
+MMK 5.12 697.52 768.25
+213 FusePIR 26.17 84.03 2304.97
+FusePIR-C 29.05 299.71 0.16
+MMK 6.64 1387.66 768.25
+256-bit 256 214 FusePIR 28.90 166.84 2304.97
+FusePIR-C 32.29 568.24 0.16
+MMK 9.34 2751.93 768.25
+215 FusePIR 33.27 318.42 2304.97
+FusePIR-C 36.82 1102.90 0.16
+MMK 7.09 1412.83 768.25
+213 FusePIR 29.65 141.90 2304.97
+FusePIR-C 33.44 568.83 0.16
+MMK 10.09 2809.91 768.25
+512 214 FusePIR 35.73 271.63 2304.97
+FusePIR-C 39.02 1098.11 0.16
+MMK 15.54 5622.93 768.25
+215 FusePIR 48.65 533.44 2304.97
+FusePIR-C 53.18 2157.08 0.16
+MMK 6.28 1402.29 768.25
+213 FusePIR 27.63 197.02 2304.97
+FusePIR-C 30.28 761.27 0.16
+MMK 9.21 2800.09 768.25
+128 214 FusePIR 32.35 400.62 2304.97
+FusePIR-C 36.97 1490.42 0.16
+MMK 15.03 5575.51 768.25
+215 FusePIR 42.46 794.01 2304.97
+FusePIR-C 46.78 2947.70 0.16
+MMK 9.73 2787.41 768.25
+213 FusePIR 31.32 316.69 2304.97
+FusePIR-C 35.81 1104.11 0.16
+MMK 15.23 5585.45 768.25
+1024-bit 256 214 FusePIR 39.83 637.79 2304.97
+FusePIR-C 45.45 2176.86 0.16
+MMK 27.50 11169.47 768.25
+215 FusePIR 58.19 1248.64 2304.97
+FusePIR-C 62.99 3989.72 0.16
+MMK 15.91 5595.95 768.25
+213 FusePIR 44.28 527.95 2304.97
+FusePIR-C 48.71 2130.46 0.16
+MMK 27.59 11115.50 768.25
+512 214 FusePIR 66.38 1059.88 2304.97
+FusePIR-C 73.54 3939.38 0.16
+MMK 52.14 22232.44 768.25
+215 FusePIR 110.58 2087.81 2304.97
+FusePIR-C 122.08 7505.61 0.16
+11
+===== PAGE 12 =====
+[LEFT]
+Table3:Setupandonlineperform
+Parameter SetupPhase
+Scheme Q=3 Q=5
+n m Prep.(s)
+Time(s) Query(MiB) Time(s) Query(MiB) Ti
+BKPIR 2.77 261.91 2.25 442.52 3.75 8
+29 CAPE 15.16 450.10 3.00 445.00 3.00 4
+CAPE-C 22.58 450.50 0.75 485.40 0.75 4
+BKPIR 3.20 524.69 2.25 872.08 3.75 17
+128 210 CAPE 29.13 848.35 3.00 839.50 3.00 8
+CAPE-C 36.14 853.90 0.75 870.64 0.75 8
+BKPIR 4.17 1055.25 2.25 1723.07 3.75 34
+211 CAPE 54.32 1332.78 3.00 1329.73 3.00 13
+CAPE-C 62.87 1337.51 0.75 1378.38 0.75 13
+BKPIR 2.74 523.95 2.25 880.07 3.75 17
+29 CAPE 16.39 474.70 3.00 472.62 3.00 4
+CAPE-C 23.08 480.82 0.75 480.38 0.75 4
+BKPIR 4.13 1084.01 2.25 1732.43 3.75 34
+256 210 CAPE 30.93 997.51 3.00 987.24 3.00 9
+CAPE-C 37.27 1030.68 0.75 1027.36 0.75 10
+BKPIR 5.81 2122.19 2.25 3569.38 3.75 68
+211 CAPE 59.26 1802.18 3.00 1808.77 3.00 18
+CAPE-C 68.82 1823.15 0.75 1849.65 0.75 18
+BKPIR 4.36 1050.55 2.25 1729.46 3.75 34
+29 CAPE 31.75 606.23 3.00 617.03 3.00 6
+CAPE-C 39.24 617.72 0.75 655.04 0.75 6
+BKPIR 5.85 2098.35 2.25 3446.91 3.75 69
+512 210 CAPE 139.20 1091.16 3.00 1146.59 3.00 10
+CAPE-C 145.22 1099.19 0.75 1098.18 0.75 11
+BKPIR 9.01 4172.11 2.25 6889.49 3.75 13
+211 CAPE 324.32 2294.85 3.00 2298.45 3.00 23
+CAPE-C 336.81 2319.60 0.75 2259.12 0.75 23
+querycompressionintroducesonlylimitedadditionalsetup
+overhead.Thegapbecomesmorepronouncedasthedatabase
+grows,particularly with increasing m,because the Bloom-
+filtermetadataisattachedtoeverycandidatevalue.Thus,the
+maincostofCAPEisshiftedtotheofflinephase,whilethe
+compressedvariantdoesnotmateriallyincreasethisprepro-
+cessingoverhead.
+Online performance. The mostnotable difference among
+the schemes is theirdependence on the numberofqueried
+keywords.ForsmallQ,BKPIRcanremaincompetitive,and
+is faster in several of the smallest settings at Q=3. As Q
+increases, however, its server time grows rapidly, whereas
+CAPE and CAPE-C remain nearly unchanged for a fixed
+database.ThistrendisevidentinFigure3(a)andholdsacross
+theconfigurationsreportedinTable3.
+Theadvantagebecomessubstantialoncetheconjunction
+contains more keywords. At Q=10,CAPE and CAPE-C
+outperform BKPIR across all evaluated database settings,
+by up to 6.47× and 6.34×,respectively. At Q=30,these
+gainsincreasetoasmuchas18.89×and18.19×.CAPE-C
+closelytracksCAPEthroughouttheexperiments,indicating
+that anchor-query compression adds relatively little server
+overheadcomparedwiththeremainingconjunctiveevalua-
+tion.Thesemeasurementsconfirmthattheonlinecostofour
+constructionsiseffectivelydecoupledfromQ.
+Querycommunication.Figure3(b)showsacorresponding
+differenceinuploadcommunication.BKPIR’squerygrows
+1
+[RIGHT]
+manceforconjunctiveretrieval.
+OnlinePhase
+Q=10 Q=20 Q=30
+Resp.(MiB)
+ime(s) Query(MiB) Time(s) Query(MiB) Time(s) Query(MiB)
+886.49 7.50 1802.11 15.00 2610.71 22.51 3.00
+450.61 3.00 441.64 3.00 456.55 3.00 0.09
+454.01 0.75 472.32 0.75 459.77 0.75 0.09
+737.63 7.50 3440.02 15.00 5273.15 22.51 6.00
+849.68 3.00 845.78 3.00 786.97 3.00 0.19
+877.32 0.75 858.30 0.75 857.19 0.75 0.19
+427.51 7.50 6927.15 15.00 10440.26 22.51 12.00
+345.04 3.00 1338.56 3.00 1332.29 3.00 0.38
+362.13 0.75 1371.94 0.75 1536.61 0.75 0.38
+714.47 7.50 3434.87 15.00 5215.41 22.51 3.00
+475.42 3.00 479.64 3.00 475.59 3.00 0.09
+475.94 0.75 482.89 0.75 479.41 0.75 0.09
+434.03 7.50 6865.42 15.00 10409.68 22.51 6.00
+997.34 3.00 996.06 3.00 1016.75 3.00 0.19
+003.81 0.75 1110.29 0.75 1021.29 0.75 0.19
+860.46 7.50 13701.57 15.00 20805.30 22.51 12.00
+839.52 3.00 1811.22 3.00 1818.42 3.00 0.38
+862.38 0.75 1875.25 0.75 1845.07 0.75 0.38
+429.78 7.50 6837.49 15.00 10409.62 22.51 3.00
+622.89 3.00 633.56 3.00 624.74 3.00 0.09
+642.29 0.75 636.65 0.75 632.17 0.75 0.09
+976.75 7.50 13673.54 15.00 20817.04 22.51 6.00
+078.10 3.00 1080.64 3.00 1101.86 3.00 0.19
+100.52 0.75 1176.95 0.75 1144.13 0.75 0.19
+3898.51 7.50 27803.97 15.00 41590.21 22.51 12.00
+380.70 3.00 2287.40 3.00 2286.94 3.00 0.38
+388.72 0.75 2304.98 0.75 2367.77 0.75 0.38
+from 2.25 MiB at Q = 3 to 22.51 MiB at Q = 30, while
+CAPEremainsatapproximately3MiBandCAPE-Catap-
+proximately0.75MiB.Consequently,CAPEhasacommu-
+nicationdisadvantageonlyforverysmallconjunctions;asQ
+grows,itsfixed-sizequerybecomesincreasinglyfavorable.
+AtQ=30,CAPEandCAPE-Creducethequerycommunica-
+tionofBKPIRbyapproximately7.5×and30×,respectively.
+CAPE-Cthereforeremovesmostoftheuploadoverheadof
+the anchor retrieval without sacrificing the Q-independent
+queryformat.
+Responsecommunication.The responseexhibits adiffer-
+ent scaling behavior from the query. As shown in Table 3,
+the BKPIR response grows withthe globalvalue universe,
+reaching3,6,and12MiBforthethreeevaluatedvaluesof
+m.CAPEandCAPE-C,incontrast,returnonlythebounded
+anchorcandidatesetanditsencryptedscores,reducingthe
+responsebyapproximately32×.Theirresponsesizesarealso
+unaffectedbynandQ.Hence,thecandidate-firstdesignpro-
+videsasubstantialresponsereductionindependentlyofthe
+numberofconjunctiveterms.
+Overall,BKPIRiscompetitiveforconjunctionswithfew
+queriedkeywords,butitsquerysizeandonlineservertime
+increasewithQ.CAPEkeepsbothcostsnearlyindependent
+ofQ,andCAPE-Cfurtherreducestheuploadcommunication.
+Bothschemesalsoreducetheresponsebyprocessingonly
+theanchorcandidatesetratherthantheglobalvalueuniverse.
+12
+===== PAGE 13 =====
+[LEFT]
+40000
+35000
+30000
+25000
+20000
+15000
+10000
+5000
+0
+3 5 10 20 30
+Number of queried keywords Q
+)s(
+emit
+revreS
+BKPIR
+CAPE
+CAPE-C
+(a)Onlineservertime
+Figure3:Onlineperformanceforconjunctiveretrievalasthenu
+512×211×16-bit.
+6 Conclusion
+WepresentedCAPE,acandidate-firstconstructionforcon-
+junctivekeywordPIR.Ratherthanevaluatingaconjunction
+overtheglobalvalueuniverse,CAPErestrictstheevaluation
+tothevaluesassociatedwithonequeriedkeyword.Toenable
+thisdesign,wedevelopedFusePIR,amulti-valuekeyword
+PIR scheme whose encrypted output remains available for
+subsequenthomomorphiccomputation.CAPEfurtheraggre-
+gatestheremainingquerykeywordsintoasinglefixed-length
+encryptedBloomquery,achievinganO(m)responsewhile
+keepingthequerysizeandservercomputationindependentof
+thenumberofqueriedkeywordsandhidingthisnumber.We
+alsointroducedFusePIR-CandCAPE-C,whichreduceup-
+loadcommunicationatthecostofadditionalserver-sidecom-
+putation.Ourimplementationconfirmsthesetradeoffs,with
+FusePIRimprovingsingle-keywordretrievaloverMMKand
+CAPEprovidingsubstantiallybetterscalabilitythanBKPIR
+asthenumberofconjunctivetermsincreases.
+EthicalConsiderations
+Thisworkdevelopseffectivesolutionsforconjunctivekey-
+wordprivateinformationretrieval,encouraginggreateratten-
+tiontotheprivacyofdatabasequeries.Theexperimentsin
+thispaperareallbasedon syntheticallygenerateddatasets
+anddonotcontainanypersonalorillegalinformation. We
+firmlybelievethatourresearchwasdoneethically.
+OpenScience
+We fully support the principles of open science and repro-
+ducible research. We have made the source code, experi-
+mental configurations, and scripts used in this paper pub-
+liclyavailableathttps://anonymous.4open.science/r/
+1
+[RIGHT]
+20
+15
+10
+5
+0
+3 5 10 20 30
+Number of queried keywords Q
+)BiM(
+ezis
+yreuQ
+BKPIR
+CAPE
+CAPE-C
+(b)Querysize
+umberofqueriedkeywordsQincreases.Thedatabaseisfixedto
+CAPE-9CE1.Theartifactalsoincludesinstructionsforrepro-
+ducingtheexperimentalresultsreportedinthispaper.
+References
+[1] IshtiyaqueAhmad,YuntianYang,DivyakantAgrawal,
+AmrElAbbadi,andTrinabhGupta. Addra:Metadata-
+privatevoicecommunicationoverfullyuntrustedinfras-
+tructure. InOSDI.USENIXAssociation,2021.
+[2] Asra Ali, Tancrède Lepoint, Sarvar Patel, Mariana
+Raykova,PhillippSchoppmann,KarnSeth,andKevin
+Yeo. Communication-computation trade-offs in PIR.
+In USENIX Security Symposium, pages 1811–1828.
+USENIXAssociation,2021.
+[3] Sebastian Angel, Hao Chen, Kim Laine, and Srinath
+T.V.Setty. PIRwithcompressedqueriesandamortized
+queryprocessing. InIEEESymposiumonSecurityand
+Privacy,pages962–979.IEEEComputerSociety,2018.
+[4] BurtonH.Bloom. Space/timetrade-offsinhashcoding
+withallowableerrors. Commun.ACM,13(7):422–426,
+1970.
+[5] NikitaBorisov,GeorgeDanezis,andIanGoldberg.DP5:
+Aprivatepresenceservice. Proc.Priv.EnhancingTech-
+nol.,2015(2):4–24,2015.
+[6] AlexanderBurton,SamirJordanMenon,andDavidJ.
+Wu. Respire: High-ratePIRfordatabaseswithsmall
+records. InCCS,pages1463–1477.ACM,2024.
+[7] DavidCash,StanislawJarecki,CharanjitS.Jutla,Hugo
+Krawczyk,Marcel-CatalinRosu,andMichaelSteiner.
+Highly-scalablesearchablesymmetricencryptionwith
+supportforbooleanqueries. InCRYPTO(1),volume
+13
+===== PAGE 14 =====
+[LEFT]
+8042ofLectureNotesinComputerScience,pages353–
+373.Springer,2013.
+[8] SofíaCeliandAlexDavidson. Callmebymyname:
+Simple,practicalprivateinformationretrievalforkey-
+wordqueries. InCCS,pages4107–4121.ACM,2024.
+[9] MelissaChaseandSenyKamara. Structuredencryption
+andcontrolleddisclosure. InASIACRYPT2010(LNCS,
+Vol.6477),pages577–594.Springer,2010.
+[10] Benny Chor,Niv Gilboa,and Moni Naor. Private in-
+formationretrievalbykeywords. IACRCryptol.ePrint
+Arch.,1998:3,1998.
+[11] Benny Chor, Eyal Kushilevitz, Oded Goldreich, and
+MadhuSudan. Privateinformationretrieval. J.ACM,
+45(6):965–981,1998.
+[12] Henry Corrigan-Gibbs, Alexandra Henzinger, and
+Dmitry Kogan. Single-server private information re-
+trievalwithsublinearamortizedtime. InEUROCRYPT
+(2),volume 13276 ofLecture Notes in ComputerSci-
+ence,pages3–33.Springer,2022.
+[13] RezaCurtmola,JuanA.Garay,SenyKamara,andRafail
+Ostrovsky. Searchablesymmetricencryption:improved
+definitions and efficient constructions. In CCS 2006,
+pages79–88.ACM,2006.
+[14] Alex Davidson, Gonçalo Pestana, and Sofía Celi.
+Frodopir:Simple,scalable,single-serverprivateinfor-
+mation retrieval. Proc. Priv. Enhancing Technol.,
+2023(1):365–383,2023.
+[15] Daniel Demmler, Peter Rindal, Mike Rosulek, and
+Ni Trieu. PIR-PSI: scaling private contact discovery.
+Proc.Priv.EnhancingTechnol.,2018(4):159–178,2018.
+[16] Craig Gentry and Zulfikar Ramzan. Single-database
+privateinformationretrievalwithconstantcommunica-
+tionrate. InICALP,volume3580ofLectureNotesin
+ComputerScience,pages803–815.Springer,2005.
+[17] Craig Gentry, Amit Sahai, and Brent Waters. Ho-
+momorphic encryption from learning with errors:
+Conceptually-simpler,asymptotically-faster,attribute-
+based. InCRYPTO(1),volume8042ofLectureNotes
+inComputerScience,pages75–92.Springer,2013.
+[18] ThomasMuellerGrafandDanielLemire. Binaryfuse
+filters: Fastandsmallerthan xorfilters. ACM J. Exp.
+Algorithmics,27:1.5:1–1.5:15,2022.
+[19] JensGroth,AggelosKiayias,andHelgerLipmaa.Multi-
+querycomputationally-privateinformationretrievalwith
+constantcommunicationrate. InPublicKeyCryptogra-
+phy,volume6056ofLectureNotesinComputerScience,
+pages107–123.Springer,2010.
+1
+[RIGHT]
+[20] AlibabaGroup. MPC4J:Amulti-partycomputationli-
+braryforjava. https://github.com/alibaba-edu/
+mpc4j.
+[21] Meng Hao, Weiran Liu, Liqiang Peng, Cong Zhang,
+Pengfei Wu, Lei Zhang, Hongwei Li, and Robert H.
+Deng. Practicalkeywordprivateinformationretrieval
+fromkey-to-indexmappings. InUSENIXSecurity2025,
+pages3397–3416.USENIXAssociation,2025.
+[22] Alexandra Henzinger, Emma Dauterman, Henry
+Corrigan-Gibbs,andNickolaiZeldovich. Privateweb
+search with tiptoe. In SOSP, pages 396–416. ACM,
+2023.
+[23] Alexandra Henzinger, Matthew M. Hong, Henry
+Corrigan-Gibbs,SarahMeiklejohn,andVinodVaikun-
+tanathan.Oneserverforthepriceoftwo:Simpleandfast
+single-serverprivateinformationretrieval. InUSENIX
+SecuritySymposium,pages3889–3905.USENIXAsso-
+ciation,2023.
+[24] AlexanderHoover,SarvarPatel,GiuseppePersiano,and
+Kevin Yeo. Plinko: Single-server PIR with efficient
+updatesviainvertibleprfs. InEUROCRYPT(6),volume
+15606ofLectureNotesinComputerScience,pages3–
+33.Springer,2025.
+[25] SenyKamara andTarikMoataz. Boolean searchable
+symmetricencryptionwithworst-casesub-linearcom-
+plexity. InEUROCRYPT(3),volume10212ofLecture
+NotesinComputerScience,pages94–124,2017.
+[26] JiayiKangandLeonardSchild. Pirouette:Queryeffi-
+cientsingle-serverPIR. Proc.Priv.EnhancingTechnol.,
+2026(2):215–241,2026.
+[27] EyalKushilevitzandRafailOstrovsky. Replicationis
+not needed: Single database,computationally-private
+informationretrieval. InProceedings38thannualsym-
+posiumonfoundationsofcomputerscience,pages364–
+373.IEEE,1997.
+[28] AlbertKwon,DavidLazar,SrinivasDevadas,andBryan
+Ford. Riffle:Anefficientcommunicationsystemwith
+strong anonymity. Proc. Priv. Enhancing Technol.,
+2016(2):115–134,2016.
+[29] ShangqiLai,SikharPatranabis,AminSakzad,JosephK.
+Liu,DebdeepMukhopadhyay,RonSteinfeld,Shifeng
+Sun,DongxiLiu,andCongZuo. Resultpatternhiding
+searchableencryptionforconjunctivequeries. InCCS,
+pages745–762.ACM,2018.
+[30] Arthur Lazzaretti and Charalampos Papamanthou.
+Treepir:Sublinear-timeandpolylog-bandwidthprivate
+informationretrievalfromDDH. InCRYPTO(2),vol-
+ume14082ofLectureNotesinComputerScience,pages
+284–314.Springer,2023.
+14
+===== PAGE 15 =====
+[LEFT]
+[31] ArthurLazzarettiandCharalamposPapamanthou. Sin-
+gle pass client-preprocessing private information re-
+trieval. InUSENIXSecuritySymposium.USENIXAs-
+sociation,2024.
+[32] Jian Liu,Jingyu Li,Di Wu,and Kui Ren. PIRANA:
+fastermulti-queryPIRviaconstant-weightcodes. InSP,
+pages4315–4330.IEEE,2024.
+[33] VadimLyubashevsky,ChrisPeikert,andOdedRegev.
+Onideallatticesandlearningwitherrorsoverrings. In
+EUROCRYPT,volume6110ofLectureNotesinCom-
+puterScience,pages1–23.Springer,2010.
+[34] VadimLyubashevsky,ChrisPeikert,andOdedRegev. A
+toolkitforring-lwecryptography. InThomasJohansson
+andPhongQ.Nguyen,editors,AdvancesinCryptology
+–EUROCRYPT2013,pages35–54,Berlin,Heidelberg,
+2013.SpringerBerlinHeidelberg.
+[35] Rasoul Akhavan Mahdavi and Florian Kerschbaum.
+Constant-weight PIR: single-round keyword PIR via
+constant-weightequalityoperators. InUSENIXSecurity
+Symposium,pages 1723–1740. USENIX Association,
+2022.
+[36] ChristopherD.Manning,PrabhakarRaghavan,andHin-
+rich Schütze. Introduction to information retrieval.
+CambridgeUniversityPress,2008.
+[37] CarlosAguilarMelchor,JorisBarrier,LaurentFousse,
+andMarc-OlivierKillijian. XPIR:Privateinformation
+retrievalforeveryone. Proc.Priv.EnhancingTechnol.,
+2016(2):155–174,2016.
+[38] SamirJordanMenonandDavidJ.Wu. SPIRAL:fast,
+high-rate single-serverPIR via FHE composition. In
+SP,pages930–947.IEEE,2022.
+[39] Samir Jordan Menon and David J. Wu. YPIR: high-
+throughputsingle-serverPIRwithsilentpreprocessing.
+InUSENIXSecuritySymposium.USENIXAssociation,
+2024.
+[40] Microsoft Research. Microsoft SEAL. https://
+github.com/microsoft/SEAL.
+[41] PrateekMittal,FemiG.Olumofin,CarmelaTroncoso,
+Nikita Borisov, and Ian Goldberg. Pir-tor: Scalable
+anonymouscommunicationusingprivateinformation
+retrieval. In USENIX Security Symposium. USENIX
+Association,2011.
+[42] MuhammadHarisMughees,HaoChen,andLingRen.
+Onionpir:Responseefficientsingle-serverPIR. InCCS,
+pages2292–2306.ACM,2021.
+1
+[RIGHT]
+[43] SarvarPatel,GiuseppePersiano,JoonYoungSeo,and
+KevinYeo. Efficientbooleansearchoverencrypteddata
+withreducedleakage.InASIACRYPT(3),volume13092
+ofLectureNotesinComputerScience,pages577–607.
+Springer,2021.
+[44] SarvarPatel,JoonYoungSeo,andKevinYeo. Don’t
+bedense: EfficientkeywordPIRforsparsedatabases.
+In USENIX Security Symposium, pages 3853–3870.
+USENIXAssociation,2023.
+[45] OdedRegev. Onlattices,learningwitherrors,random
+linearcodes,andcryptography. InSTOC,pages84–93.
+ACM,2005.
+[46] GerardSaltonandMichaelMcGill.IntroductiontoMod-
+ern Information Retrieval. McGraw-HillBook Com-
+pany,1984.
+[47] DawnXiaodongSong,DavidWagner,andAdrianPerrig.
+Practicaltechniquesforsearchesonencrypteddata. In
+S&P2000,pages44–55.IEEE,2000.
+[48] JieSong,ZhenXu,YanZhang,PengweiZhan,Mingx-
+uanLi,ShuaiMa,andRuXie.BKPIR:keywordPIRfor
+privatebooleanretrieval. InNDSS.TheInternetSociety,
+2026.
+[49] YunlingWang,Shi-FengSun,JianfengWang,Xiaofeng
+Chen, Joseph K. Liu, and Dawu Gu. Practical non-
+interactiveencryptedconjunctivesearchwithleakage
+suppression. InCCS,pages4658–4672.ACM,2024.
+[50] David J. Wu, Joe Zimmerman, Jérémy Planul, and
+JohnC.Mitchell. Privacy-preservingshortestpathcom-
+putation. InNDSS.TheInternetSociety,2016.
+[51] MingxunZhou,Wei-KaiLin,YiannisTselekounis,and
+ElaineShi. Optimalsingle-serverprivateinformation
+retrieval. InEUROCRYPT(1),volume14004ofLecture
+NotesinComputerScience,pages395–425.Springer,
+2023.
+[52] Mingxun Zhou, Andrew Park, Wenting Zheng, and
+ElaineShi. Piano:Extremelysimple,single-serverPIR
+withsublinearservercomputation. InSP,pages4296–
+4314.IEEE,2024.
+A BinaryFuseFilter
+This appendix describes the construction of the BFF used
+in Section 2.4. The procedure follows the mapping-and-
+assignmentstructure ofstandardBFF,butreplaces bitwise
+XORwithcomponent-wiseadditionoverZ.Theconstruc-
+t
+tionsupportsk∈{3,4}locationsperkeyword.Ourconcrete
+FusePIR instantiation uses k=3, whereas the description
+belowremainsvalidforbothchoices.
+15
+===== PAGE 16 =====
+[LEFT]
+During setup, the parameter s determines the segment
+size of the BFF layout. The position functions generated
+byBFF.HashGenmapeachkeywordtokdistinctlocations
+distributedacrosskconsecutivesegments.Theconcretefinite-
+sizechoicesofsandL followtheparameterizationofBFF
+BFF
+used in ChalametPIR [8]. For large n, the resulting array
+lengthsapproach1.125nand1.075nfork=3andk=4,re-
+spectively.Theseedsρ andρ aresampledindependently.
+H fp
+TheformerdeterminestheBFFlocations,whereasthelatter
+isusedtodetectqueriesforkeywordsthatwerenotencoded.
+Themappingstepdeterminesanorderinwhichthekeys
+can be assigned to filter locations. The temporary set T[u]
+containsallremainingkeysmappedtolocationu.Whenever
+T[u]containsexactlyonekeyK,locationuisdesignatedas
+thewritelocationofK.Thepair(K,u)isrecordedinS,and
+K is removed from all of its k locations. This may create
+newsingletonlocations,whichareaddedtoQ.Themapping
+succeedsifallnkeysareeventuallyplacedinS.
+TheEncodeprocedurefirstinvokesMappingSteptoobtain
+thepeelingstackS.Ifthemappingfails,thecurrentconstruc-
+tionattemptisdiscarded,andSetupisrepeatedwithafresh
+position-functionseed.Afterasuccessfulmapping,allarray
+entriesareinitializeduniformlyinZB. Theprocedurethen
+t
+processesSinlast-in-first-outorder.Foreachpair(K,p),it
+overwritesthedesignatedlocation psothatthesumofthek
+entriesassociatedwithK equalsy modulot.
+K
+Finally,Checkprocedureevaluatesthekpositionfunctions
+onKandreturnsthecorrespondingarrayentries.Reconstruct
+procedure then adds them component-wise modulo t. For
+every encoded keyword K, the assignment performed by
+i
+Encodeguaranteesthattheresultisexactlyy .
+Ki
+B FusePIR-C:Query-CompressedFusePIR
+FusePIR-CreducestheuploadcommunicationofFusePIRby
+compressingitsencryptedselectors.Thearithmetic-BFFen-
+coding,payloadlayout,andencryptedreconstructionremain
+unchanged. Insteadofdirectly sending the RLWE one-hot
+columnselectorsandLWErowselectors,theclientsendscom-
+pactseededLWEencryptionsoftheirbinarycoordinates.The
+serverreconstructstheseciphertextsandhomomorphically
+recovers the selectors required by the FusePIR answering
+procedure.
+Let ℓ = ⌈log C⌉ and ℓ = ⌈log R⌉. For bin (x) =
+c 2 r 2 ℓ
+(x 0 ,...,x ℓ−1 ), we use the convention x = ∑ ℓ j − = 1 0 2jx j . Fol-
+lowing the seeded-query technique of PirouetteH, the a-
+componentsofallLWEciphertextsarederivedfromasingle
+randomseedρ.Hence,theonlinequerycontainsonlyρand
+the corresponding LWE β-components. At the server, the
+same seed reconstructs the omitted a-components. The re-
+sulting LWE encryptions are converted to RGSW form by
+LWEtoRGSW; the column bits are then expanded into the
+encryptedone-hotselector,whiletherowbitsdrivethebit-
+wiseevaluationofBlindRotate.Theremainingretrievaland
+1
+[RIGHT]
+reconstructionareexactlythoseofFusePIR.
+TheredlinesinAlgorithm4indicatethestepsintroduced
+ormodifiedforquerycompression.
+CorrectnessandSecurity.FusePIR-Cchangesonlytherep-
+resentationandserver-siderecoveryoftheencryptedselectors.
+Oncetheseselectorsarereconstructed,theselection,BFFre-
+construction,packing,anddecodingproceduresareidentical
+toFusePIR.
+Theorem 5 (Correctness). Assuming the correctness of
+FusePIR, LWEtoRGSW, and the homomorphic selector-
+expansion procedure,FusePIR-C achieves correctness for
+single-keywordretrievalaccordingtoDefinition1.
+The argument follows that of Theorem 1. The common
+seedallowstheservertoreconstructthesameLWEcipher-
+textsgeneratedbytheclient,andthesubsequentconversion
+andselectorexpansionrecoverencryptionsofthesamerow
+andcolumnselectionsusedbyFusePIR.Theremainingcom-
+putationisunchanged,sotheadditionalcorrectnesserroris
+negligibleundertheunderlyinghomomorphicprocedures.
+Theorem6(Security). AssumingtheIND-CPAsecurityof
+theunderlyingLWEandRLWEencryptionschemesandthe
+pseudorandomnessofPRG,FusePIR-CisIND-CKAsecure
+forsingle-keywordretrievalaccordingtoDefinition2.
+The security argument is analogous to Theorem 2. The
+transmitted seed is independent of the queried keyword,
+and its PRG outputs can be replaced by uniform LWE a-
+components withnegligible distinguishing advantage. The
+resulting query components are then handled by the same
+LWE-basedhybridargumentasinFusePIR.Allselectorex-
+pansionisperformedlocallybytheserveraspost-processing
+oftheencryptedqueryandthereforedoesnotrevealadditional
+informationaboutthequeriedkeyword.
+C CAPE-C:Query-CompressedCAPE
+CAPE-C applies the query-compression technique of
+FusePIR-C to the anchor retrieval of CAPE. The value-
+specificBloom-filterencoding,encryptedBloomquery,score
+evaluation, and response format remain unchanged. Thus,
+CAPE-Creducesthecommunicationrequiredtoquerythe
+anchorkeywordwithoutmodifyingtheconjunctivefiltering
+mechanismofCAPE.
+Morespecifically,theanchorqueryisgeneratedandevalu-
+atedusingFusePIR-CinsteadofFusePIR.Theserverthere-
+forereconstructsthesameencryptedextendedpayloadasin
+CAPE,afterwhichtheoriginalBloom-scorecomputationis
+applied directly. The red lines in Algorithm 5 indicate the
+stepsthatdifferfromCAPE.
+Correctness and Security. CAPE-C changes only the en-
+cryptedretrievaloftheanchorpayload.OncetheFusePIR-C
+selectorexpansioniscompleted,theserverobtainsthesame
+16
+===== PAGE 17 =====
+[LEFT]
+Algorithm3BinaryFuseFilter
+SETUP(n,k,B,t,µ)
+1: ifk=3then
+2: s←2⌊log3.33(n)+2.25⌋.
+(cid:40) (cid:41)
+3: LBFF←max (cid:108)(cid:16) 0.875+0.25max (cid:110) 1,log
+lo
+(
+g
+10
+n
+6) (cid:111)(cid:17) n (cid:109) ,⌈1.125n⌉ .
+4: elseifk=4then
+5: s←2⌊log2.91(n)−0.5⌋.
+(cid:40) (cid:41)
+6: LBFF←max (cid:108)(cid:16) 0.77+0.305max (cid:110) 1,log
+l
+(
+o
+6
+g
+·1
+n
+05) (cid:111)(cid:17) n (cid:109) ,⌈1.075n⌉ .
+7: endif
+8: SampleindependentpublicseedsρH,ρfp←$ {0,1}λ.
+9: DeriveH={hj:K →[LBFF]}k
+j=
+−
+0
+1←BFF.HashGen(ρH,LBFF,s,k).
+10: Deriveafingerprintfunctionfp :K →{0,1}µ.
+ρfp
+11: foru=0toLBFF−1do
+12: D[u]←⊥.
+13: endfor
+(cid:0) (cid:1)
+14: return D,H,fp
+ρfp
+,LBFF,s .
+MAPPINGSTEP({Ki}n
+i=1
+,H,LBFF)
+1: OrderK1,...,Knbyh0(Ki)anddenotetheresultingsequencebyL.
+2: foru=0toLBFF−1do
+3: T[u]←0/.
+4: endfor
+5: foreachK∈Ldo
+6: for j=0tok−1do
+7: T[hj(K)]←T[hj(K)]∪{K}.
+8: endfor
+9: endfor
+10: InitializeanemptystackQandanemptystackS.
+11: foru=0toLBFF−1do
+12: if|T[u]|=1then
+13: PushuintoQ.
+14: endif
+15: endfor
+16: whileQ̸=0/do
+17: PopalocationufromQ.
+18: if|T[u]|=1then
+19: K←theuniquekeywordinT[u].
+20: Push(K,u)ontoS.
+21: for j=0tok−1do
+22: v←hj(K).
+23: T[v]←T[v]\{K}.
+encryptedcandidatevaluesandvalue-specificBloomfilters
+as in CAPE. The subsequent Bloom-score evaluation and
+decodingareunchanged.
+Theorem 7 (Correctness). Assuming the correctness of
+FusePIR-Candtheunderlyinghomomorphicevaluationpro-
+cedures,andassumingnegligibleBloom-filterfalse-positive
+probability, CAPE-C achieves correctness for conjunctive
+keywordretrievalaccordingtoDefinition1.
+TheargumentfollowsTheorem3withtheFusePIRanchor
+retrievalreplacedbyFusePIR-C.BycorrectnessofFusePIR-
+C,the same encrypted anchorpayload is recovered except
+withnegligibleprobability.CAPE-Cthenperformsexactly
+theBloom-scoretestofCAPE,sotheno-false-negativeprop-
+ertyandfalse-positiveanalysisremainunchanged.
+Theorem 8 (Security). Assuming that FusePIR-C is IND-
+1
+[RIGHT]
+24: if|T[v]|=1then
+25: PushvintoQ.
+26: endif
+27: endfor
+28: endif
+29: endwhile
+30: if|S|̸=nthen
+31: returnfail.
+32: endif
+33: returnS.
+ENCODE(D,H,{(Ki,yKi )}n
+i=1
+)
+1: S←MappingStep (cid:0) {Ki}n
+i=1
+,H,LBFF (cid:1) .
+2: ifS=failthen
+3: returnfail.
+4: endif
+5: foru=0toLBFF−1do
+6: D[u]←$ ZB.
+t
+7: endfor
+8: whileS̸=0/do
+9: Pop(K,p)fromS.
+10: RetrievethepayloadyKassociatedwithK.
+11: D[p]←yK.
+12: for j=0tok−1do
+13: ifhj(K)̸=pthen
+14: D[p]←D[p]−D[hj(K)] (modt).
+15: endif
+16: endfor
+17: endwhile
+18: returnD.
+CHECK(D,H,K)
+1: for j=0tok−1do
+2: dj←D[hj(K)].
+3: endfor
+4: return(d0,...,dk−1 ).
+RECONSTRUCT(D,H,K)
+5: (d0,...,dk−1 )←Check(D,H,K).
+6: y←0B.
+7: for j=0tok−1do
+8: y←y+dj (modt).
+9: endfor
+10: returny.
+CKAsecureandthattheunderlyingRLWEencryptionscheme
+isIND-CPAsecure,CAPE-CisIND-CCKAsecureforcon-
+junctivekeywordretrievalaccordingtoDefinition3.
+ThesecurityargumentisanalogoustoTheorem4.Inthe
+ℓ-query experiment,the anchor components are hidden by
+theIND-CKAsecurityofFusePIR-C,whilethefixed-length
+encryptedBloomqueriesarehiddenbyRLWEIND-CPAse-
+curity.Astandardhybridargumentthereforegivesnegligible
+distinguishingadvantage.SincetheBloom-queryformatis
+independentofthenumberofnon-anchorkeywordsandthe
+thresholdτremainsintheprivateclientstate,theargument
+alsoappliestochallengequeriescontainingdifferentnumbers
+ofkeywords.
+17
+===== PAGE 18 =====
+[LEFT]
+Algorithm4FusePIR-C
+SETUP(1λ,DB)
+1: (pp,stS,sk)←FusePIR.Setup(1λ,DB).
+2: GeneratethepublicevaluationmaterialrequiredbyLWEtoRGSW.
+3: return(pp,stS,sk).
+QUERY(pp,sk,K)
+1: ℓc←⌈log
+2
+C⌉, ℓr←⌈log
+2
+R⌉.
+2: ρ←$ {0,1}λ.
+3: fora=0to2do
+4: ua←ha(K), ra←uamodR, ca←⌊ua/R⌋.
+5: za←binℓc (ca)∥binℓr (ra).
+6: for j=0toℓc+ℓr−1do
+7: aa,j←PRG(ρ,a,j)∈Zd
+q
+.
+8: βa,j←⟨aa,j,sL⟩+∆za[j]+ea,j (modq).
+9: endfor
+10: endfor
+11: q←(ρ,{βa,j}a,j).
+12: stC←K.
+13: return(q,stC).
+ANSWER(stS,q)
+1: ParsestS=({Pc,b}c,b,pp).
+2: Parseq=(ρ,{βa,j}a,j).
+3: fora=0to2do
+Algorithm5CAPE-C
+(cid:16) (cid:17)
+SETUP 1λ,DB={Ki(cid:55)→VKi ={vi,1,...,vi,mi }}n
+i=1
+1: SelectpublicBloom-filterparametersℓBFandG={g1,...,gh}.
+3 2 : : f m or ← ea m ch ax v i∈ ∈ [n (cid:83) ] |V n i= K 1 i | V . Ki do
+4: Sv←{Ki:v∈VKi }.
+5: bv←BF.Gen(0,Sv).
+6: endfor
+7: fori=1tondo
+8: V
+K
+C
+i
+APE←{(vi,j,bvi,j )}m
+j=
+i
+1
+.
+9: endfor
+10: DBCAPE←{Ki(cid:55)→V
+K
+C
+i
+APE}n
+i=1
+.
+11: (pp
+F
+,stF
+S
+,sk)←FusePIR-C.Setup(1λ,DBCAPE).
+12: pp←(pp
+F
+,ℓBF,G,m).
+13: stS←stF
+S
+.
+14: return(pp,stS,sk).
+QUERY(pp,sk,K=(K1,...,KQ))
+1: (qanc,st
+C
+anc)←FusePIR-C.Query(pp
+F
+,sk,K1).
+2: bqry←BF.Gen(0,{K2,...,KQ}).
+D SchemeProofs
+D.1 CorrectnessProofofFusePIR
+Proof. Fix a database DB and a queried keyword K. For
+a∈{0,1,2},letu =h (K),r =u modR,c =⌊u /R⌋.
+a a a a a a
+WefirstconsideranexecutioninwhichthearithmeticBFF
+issuccessfullyconstructedandallhomomorphicoperations
+arecorrect.Foreverypayloadblockb,theencryptedcolumn
+selector chooses the column c , and the subsequent blind
+a
+rotation and sample extraction recover the entry at row r .
+a
+Hence,Dec (ct )=D[h (K)][b]foreverya∈{0,1,2}.
+sL a,b a
+Since the three extractedciphertexts are underthe same
+1
+[RIGHT]
+4: for j=0toℓc+ℓr−1do
+5: aa,j←PRG(ρ,a,j).
+6: (cid:98)za,j←(aa,j,βa,j).
+7: Ca,j←LWEtoRGSW((cid:98)za,j).
+8: endfor
+9: Cc
+a
+ol←(Ca,0,...,Ca,ℓc−1 ).
+10: Cr
+a
+ow←(Ca,ℓc ,...,Ca,ℓc+ℓr−1 ).
+11: HomomorphicallyexpandCc
+a
+olinto(cid:98) qc
+a
+ol,anencryptionofeca .
+12: forb=1toBpaydo
+C−1
+13: Acca,b← ∑CtPtMul( (cid:98) qc a ol[c],Pc,b(X)).
+c=0
+14: Acc′
+a,b
+←BlindRotate(Cr
+a
+ow,Acca,b).
+15: cta,b←SampleExtract
+0
+(Acc′
+a,b
+).
+16: endfor
+17: endfor
+18: forb=1toBpaydo
+(cid:0) (cid:1)
+19: ctpay,b←CtCtAdd CtCtAdd(ct 0,b,ct 1,b),ct 2,b .
+20: endfor
+21: resp←Pack({ctpay,b} B
+b=
+pa
+1
+y).
+22: returnresp.
+DECODE(sk,stC,resp)
+1: returnFusePIR.Decode(sk,stC,resp).
+3: τ←∥bqry∥1.
+4: qBF←RLWE.EncsR (bqry).
+5: q←(qanc,qBF).
+6: stC←(st
+C
+anc,τ).
+7: return(q,stC).
+ANSWER(stS,q)
+1: Parse(qanc,qBF)fromq.
+2: resp
+anc
+←FusePIR-C.Answer(stS,qanc).
+3: Parse{(ctvj ,ctB
+j
+F)}m
+j=1
+fromresp
+anc
+.
+4: for j=1tomdo
+5: ctscore,j←CtCtMul(qBF,ctB
+j
+F).
+6 7 : : for c r t = sco 0 re t , o j← log C 2 ℓ tC BF tA − d 1 d (cid:0) d c o tscore,j,CtRotate(ctscore,j,2r) (cid:1) .
+8: endfor
+9: endfor
+10: resp← (cid:0) {ctvj ,ctscore,j}m
+j=1
+(cid:1) .
+11: returnresp.
+DECODE(sk,stC,resp)
+1: returnCAPE.Decode(sk,stC,resp).
+LWEkey,theirhomomorphicsumsatisfies
+2
+Dec (ct )= ∑D[h (K)][b] (mod t).
+sL pay,b a
+a=0
+BythecorrectnessofthearithmeticBFFencoding,
+2
+∑D[h (K)]=y (mod t).
+a K
+a=0
+Therefore,afterpackinganddecryption,theclientrecovers
+exactlythepayloady .Thefingerprintverificationsucceeds,
+K
+andremovingthepaddingyieldsV .
+K
+It remains to bound the probability that the above exe-
+cutionfails.Letε (λ)denotetheprobabilitythatavalid
+BFF
+18
+===== PAGE 19 =====
+[LEFT]
+arithmeticBFFencodingisnotobtainedaftertheprescribed
+setup procedure. By the correctness of the BFF construc-
+tion,ε (λ)=negl(λ).Letε (λ)upper-boundthecorrect-
+BFF HE
+nesserrorofeachunderlyinghomomorphicoperation.The
+answering procedure performs only a polynomial number
+p(λ)=O(CB )ofsuchoperations.Byaunionbound,
+pay
+Pr[Bad ]≤p(λ)ε (λ)=negl(λ),
+HE HE
+sinceapolynomialmultipleofanegligiblefunctionremains
+negligible.
+Consequently,
+Pr[R̸=V ]≤ε (λ)+Pr[Bad ]
+K BFF HE
+≤ε (λ)+p(λ)ε (λ)
+BFF HE
+=negl(λ).
+Thus,Pr[R=V ]≥1−negl(λ),whichsatisfiesthecorrect-
+K
+nessrequirementofDefinition1forQ=1.
+D.2 SecurityProofofFusePIR
+Proof. Let A be any PPT adversary in the ℓ-QINDsingle
+Π,A
+experiment, where ℓ = poly(λ). After receiving
+(pp,st ,DB), A chooses two keyword sequences
+S
+(0) (0) (1) (1)
+(K ,...,K ) and(K ,...,K ).Forr∈[ℓ],β∈{0,1},
+1 ℓ 1 ℓ
+anda∈{0,1,2},defineu
+(β)
+=h (K
+(β)
+),r
+(β)
+=u
+(β)
+modR,
+r,a a r r,a r,a
+(cid:22) (cid:23)
+c (β) = u( r, β a ) .Thecorrespondingquerycomponentsare
+r,a R
+qcol,(β)
+←RLWE.Enc
+(cid:0)
+e
+(cid:1) ,qrow,(β)
+←LWE.Enc
+(cid:0)
+r
+(β)(cid:1)
+.
+r,a sR c(
+r,
+β
+a
+) r,a sL r,a
+Thepublicparametersandtheserverstatearegenerated
+beforethechallengebitissampledandareindependentofb.
+Hence,theonlychallenge-dependentpartoftheadversary’s
+viewisthecollectionofthe3ℓRLWEciphertextsandthe3ℓ
+LWEciphertextscontainedinthechallengequeries.
+Considerasequenceofhybridsthattransformsthequery
+(0) (0) (1) (1)
+transcript for (K ,...,K ) into that for (K ,...,K ).
+1 ℓ 1 ℓ
+We first replace, one at a time, each RLWE encryption
+(cid:0) (cid:1) (cid:0) (cid:1)
+RLWE.Enc e with RLWE.Enc e , for all r ∈[ℓ]
+sR c(
+r,
+0
+a
+) sR c(
+r,
+1
+a
+)
+anda∈{0,1,2}.Eachpairofadjacenthybridsdiffersinonly
+oneRLWEciphertext.ByIND-CPAsecurityofRLWE,the
+distinguishingadvantagebetweentwoadjacenthybridsisat
+mostε (λ),where
+RLWE
+ε (λ)=negl(λ).
+RLWE
+Sincethereare3ℓsuchreplacements,ahybridargumentgives
+∆ ≤3ℓε (λ).
+col RLWE
+We then replace, one at a time, each LWE encryption
+(cid:0) (0)(cid:1) (cid:0) (1)(cid:1)
+LWE.Enc r withLWE.Enc r .ByIND-CPAsecu-
+sL r,a sL r,a
+rityofLWE,eachreplacementchangestheadversary’sview
+1
+[RIGHT]
+byatmostε (λ)=negl(λ).Therefore,
+LWE
+∆ ≤3ℓε (λ).
+row LWE
+Combiningthetwohybridsequences,
+∆≤3ℓε (λ)+3ℓε (λ)=negl(λ),
+RLWE LWE
+becauseℓispolynomialinλandapolynomialmultipleofa
+negligiblefunctionremainsnegligible.
+LetView andView denotethecompleteviewsofAwhen
+0 1
+thechallengebitis0and1,respectively.Theabovehybrid
+argumentimplies
+|Pr[A(View )=1]−Pr[A(View )=1]|≤negl(λ).
+1 0
+Consequently,
+(cid:12) (cid:12)
+(cid:12) (cid:12) (cid:12) P Π sin ,A gle− 2 1(cid:12) (cid:12) (cid:12) = 1 2 |Pr[A(View 1 )=1]−Pr[A(View 0 )=1]|
+≤negl(λ).
+Thus,FusePIRsatisfiestheIND-CKAsecurityrequirement
+ofDefinition2.
+D.3 CorrectnessProofofCAPE
+Proof. Fix a database DB and a conjunctive query K =
+(K ,...,K ). By Theorem 1, except with negligible prob-
+1 Q
+ability ε (λ), the anchor retrieval correctly recovers the
+Fuse
+encryptedextendedpayloadassociatedwithK .Hence,the
+1
+candidatesconsideredbyCAPEareexactlythem valuesin
+K1
+V .
+K1
+Considerananchorcandidatev .Letb =BF.Gen(0,{K:
+j j
+v ∈V }) and recall that b = BF.Gen(0,{K ,...,K }),
+j K qry 2 Q
+andτ=∥b ∥ .Conditionedoncorrecthomomorphicscore
+qry 1
+evaluation,thedecryptedscoreis
+ℓBF−1
+s =⟨b ,b ⟩= ∑ b [ℓ]b [ℓ].
+j qry j qry j
+ℓ=0
+Sincebothvectorsarebinary,
+ℓBF−1
+0≤s ≤ ∑ b [ℓ]=τ.
+j qry
+ℓ=0
+Therefore,s >τcannotoccurinacorrectexecution.
+j
+Suppose first that v ∈(cid:84)Q V . Then every non-anchor
+j i=1 Ki
+keywordK,i≥2,belongstothesetencodedbyb .Bythe
+i j
+no-false-negativeBloomfilters,everypositionsetinb is
+qry
+also set in b . Consequently,s =τ,and CAPE accepts v .
+j j j
+Hence,theBloom-scoretestintroducesnofalsenegatives.
+Conversely,if s <τ,at least one position set in b is
+j qry
+zeroinb .Suchacandidatecannotcontaineverynon-anchor
+j
+querykeyword,andtherefore
+Q
+(cid:92)
+s <τ =⇒ v ∈/ V .
+j j Ki
+i=1
+19
+===== PAGE 20 =====
+[LEFT]
+Thus,everycandidatewithscorebelowτiscorrectlyrejected.
+Itremainstoconsideranon-matchingcandidatesatisfying
+s =τ.Define
+j
+(cid:12) (cid:12)
+d
+j
+=(cid:12){i∈{2,...,Q}:v
+j
+∈/V
+Ki
+}(cid:12).
+For a non-matching anchor candidate,d ≥1. Acceptance
+j
+withs =τrequireseveryoneofthesed missingkeywords
+j j
+topasstheBloom-filtermembershiptestfalsely.Underthe
+standardindependent-hashingapproximation,
+Pr[s =τ|v ∈/(cid:84)Q V ]≈ε dj.
+j j i=1 Ki BF
+Without relying on independence between these tests, the
+conservativebound
+Pr[s =τ|v ∈/(cid:84)Q V ]≤ε (λ)
+j j i=1 Ki BF
+issufficient.
+Sinceatmostmanchorcandidatesaretested,aunionbound
+gives
+Pr[Bad ]≤mε (λ)=negl(λ),
+BF BF
+assumingm=poly(λ)andε (λ)isnegligible.
+BF
+ThescorecomputationperformsO(mℓ )homomorphic
+BF
+operations.Ifε (λ)upper-boundsthecorrectnesserrorof
+HE
+eachoperation,then
+Pr[Bad ]≤O(mℓ )ε (λ)=negl(λ).
+score BF HE
+Combiningallfailureevents,
+(cid:34) Q (cid:35)
+(cid:92)
+Pr R̸= V ≤ε (λ)+Pr[Bad ]+Pr[Bad ]
+Ki Fuse score BF
+i=1
+=negl(λ).
+Therefore,
+(cid:34) Q (cid:35)
+(cid:92)
+Pr R= V ≥1−negl(λ),
+Ki
+i=1
+whichsatisfiesDefinition1.
+D.4 SecurityProofofCAPE
+Proof. Let A be any PPT adversary in the ℓ-QINDconj ex-
+Π,A
+periment, for any polynomially bounded ℓ. After receiv-
+ing (pp,st ,DB),A chooses two sequences of conjunctive
+S
+(0) (0) (1) (1)
+queries(K ,...,K )and(K ,...,K ),where,forr∈
+1 ℓ 1 ℓ
+(cid:18) (cid:19)
+[ℓ]andβ∈{0,1},K
+(β)
+= K
+(β)
+,...,K
+(β)
+.
+r r,1 r,Q(
+r
+β)
+Foreachchallengequery,CAPEgeneratesananchorquery
+(cid:16) (cid:17)
+q
+(β)
+←FusePIR.Query pp ,sk,K
+(β)
+r,anc F r,1
+2
+[RIGHT]
+andaBloomquery
+(cid:16) (cid:17)
+qBF,(β)
+←RLWE.Enc b
+(β)
+,
+r sR r
+where
+(cid:18) (cid:19)
+b
+(β)
+=BF.Gen 0,{K
+(β)
+,...,K
+(β)
+} .
+r r,2 r,Q(
+r
+β)
+Thethresholdτ
+(β)
+=∥b
+(β)
+∥ isretainedintheclientstateand
+r r 1
+isnotincludedinthequerymessage.
+Thepublicparameters,serverstate,anddatabasearefixed
+beforethechallengebitissampled.Hence,itsufficestocon-
+siderthechallenge-dependentquerymessages.Weproceed
+throughasequenceofhybridexperiments.
+HybridH .Thisistherealexperimentconditionedonb=0.
+0
+Thus,foreveryr∈[ℓ],theadversaryreceives
+(cid:16) (cid:17)
+q
+(0) ,qBF,(0)
+.
+r,anc r
+(0) (1)
+HybridH .Replaceallanchorqueriesq byq ,while
+1 r,anc r,anc
+leavingtheBloomqueriesqBF,(0)
+unchanged.Bytheℓ-query
+r
+IND-CKAsecurityofFusePIR,thereexistsanegligiblefunc-
+tionε (λ)suchthat
+Fuse
+|Pr[A(H )=1]−Pr[A(H )=1]|≤ε (λ).
+0 1 Fuse
+WenextreplacetheBloomqueries.Forr=0,...,ℓ,letH
+1,r
+denotethehybridinwhichtheBloomqueriesforthefirstr
+(1) (1)
+challengequeriesaregeneratedfromb ,...,b ,whilethe
+1 r
+(0) (0)
+remainingBloomqueriesaregeneratedfromb ,...,b .
+r+1 ℓ
+Thus,H =H .
+1,0 1
+Foreveryr∈[ℓ],theadjacenthybridsH andH dif-
+1,r−1 1,r
+(cid:16) (cid:17)
+(0)
+feronlyinthesingleRLWEciphertextRLWE.Enc b
+sR r
+(cid:16) (cid:17)
+(1)
+andRLWE.Enc b .BytheIND-CPAsecurityoftheun-
+sR r
+derlyingRLWEencryptionscheme,thereexistsanegligible
+functionε (λ)suchthat
+RLWE
+|Pr[A(H )=1]−Pr[A(H )=1]|≤ε (λ).
+1,r−1 1,r RLWE
+Applying the triangle inequality over the hybrid sequence
+gives
+(cid:12) (cid:12)
+(cid:12)Pr[A(H
+1
+)=1]−Pr[A(H
+1,ℓ
+)=1](cid:12)
+ℓ
+≤ ∑ε (λ)=ℓε (λ)=negl(λ),
+RLWE RLWE
+r=1
+sincethesequencecontainsonlypolynomiallymanyhybrid
+transitionsandapolynomialsumofnegligiblefunctionsre-
+mainsnegligible.
+Let H = H . In H , both the anchor queries and the
+2 1,ℓ 2
+(1) (1)
+Bloom queries are generated from (K ,...,K ). Hence,
+1 ℓ
+20
+===== PAGE 21 =====
+[LEFT]
+H isdistributedidenticallytotherealexperimentconditioned
+2
+onb=1.
+Combiningthetwohybridsteps,
+|Pr[A(H )=1]−Pr[A(H )=1]|
+0 2
+≤ε (λ)+ℓε (λ)=negl(λ).
+Fuse RLWE
+(0) (1)
+Importantly,this argument does not require Q =Q .
+r r
+Foreveryconjunctivequery,CAPEalwayssendsoneanchor
+queryandoneRLWEciphertextencryptingaBloomvector
+of the fixed public length ℓ ,regardless of the numberof
+BF
+(β)
+queriedkeywords.Moreover,thethresholdτ remainspri-
+r
+(0) (1)
+vatetotheclient.Therefore,differentvaluesofQ andQ
+r r
+donotalterthequeryformatobservedbytheserver.
+Let p denote the probabilitythatA outputs 1 when the
+β
+challengebitisβ.Fromtheabovehybrids,
+|p −p |≤negl(λ).
+1 0
+Therefore,
+(cid:12) (cid:12)
+(cid:12) (cid:12) (cid:12) P Π co ,A nj− 1 2 (cid:12) (cid:12) (cid:12) = 2 1 |p 1 −p 0 |
+≤negl(λ).
+Thus,CAPEsatisfiestheIND-CCKAsecurityrequirementof
+Definition3.
+2
+[RIGHT]
+21

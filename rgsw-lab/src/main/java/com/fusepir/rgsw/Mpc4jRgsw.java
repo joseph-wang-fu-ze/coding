@@ -195,26 +195,20 @@ public final class Mpc4jRgsw {
         }
     }
 
-    /**
-     * 在 NTT 域把 g·(私钥) 加到分量 polyIndex 上。
-     * SEAL 的私钥本身以 NTT 形式存储，所以直接逐系数相乘相加即可。
+    /*
+     * 【曾经踩过的坑，留档以免以后又走回头路】
+     *
+     * 早期这里有一个 addScaledSecretNtt()：把私钥 s 当作 NTT 域数组，逐系数乘 g 再加到密文上，
+     * 用来构造 group1 的相位 g·s。它在 MPC4J 上必错，原因有两个：
+     *
+     *   1. MPC4J 的私钥是"系数域的 ternary 多项式"（KeyGenerator 里
+     *      RingLwe.samplePolyTernary(..., secretKeyRns.coeff()) 直接写进 coeff()），
+     *      不是 NTT 域。对系数域数组做"逐系数相乘"得到的东西没有数学含义。
+     *   2. 即使私钥恰好在 NTT 域，"逐 NTT 系数相乘"也不等于多项式乘 g（那是逐点乘，
+     *      对应的是多项式环里的循环卷积，不是缩放）。
+     *
+     * 正确且更省事的做法见 encryptRgswConstant()：根本不碰私钥，把 g 加到第二个分量上。
      */
-    private void addScaledSecretNtt(Ciphertext ct, int polyIndex, BigInteger g) {
-        long[] data = ct.data();
-        long[] skData = sk.data().data();
-        int L = primes.length;
-        for (int j = 0; j < L; j++) {
-            long p = primes[j].value();
-            long v = g.mod(BigInteger.valueOf(p)).longValue();
-            int off = (polyIndex * L + j) * n;
-            int skOff = j * n;
-            for (int i = 0; i < n; i++) {
-                long prod = skData[skOff + i] * v % p;
-                long s = data[off + i] + prod;
-                data[off + i] = s >= p ? s - p : s;
-            }
-        }
-    }
 
     /** 一个 RGSW 密文：两组、每组 levels 个密文 */
     public static final class Rgsw {
@@ -253,7 +247,11 @@ public final class Mpc4jRgsw {
 
             Ciphertext c1 = toNtt(encryptZero());
             if (mu == 1) {
-                addScaledSecretNtt(c1, 0, power);      // g_i · (μ·s)
+                // 关键一步：不要显式去算 g_i·s（见上方留档的坑）。NTT 是线性的，
+                // 把常数 g_i 加到第二个分量上，相位就自动多出 g_i·s：
+                //     phase(c0, c1 + g) = c0 + (c1 + g)·s = phase + g·s
+                // 于是 group1[i] 的相位 = g_i·(μ·s)，和定义完全一致，且全程不接触私钥。
+                addConstantNtt(c1, 1, power);          // 相位 += g_i · (μ·s)
             }
             g1[i] = c1;
 
@@ -286,7 +284,23 @@ public final class Mpc4jRgsw {
         return x;
     }
 
-    /** 把一个分量切成 levels 段（输入会先转回系数域，用副本，不动原密文） */
+    /**
+     * 把一个分量切成 levels 段（输入会先转回系数域，用副本，不动原密文）。
+     *
+     * <p><b>这里必须用"平衡位"（balanced digits），不能用无符号位。</b>
+     * MPC4J 的 {@code transformToNttInplace(Plaintext, parmsId)} 做的是 fast plain lift：
+     * 先把明文系数按"有符号代表元"嵌进 RNS —— {@code 值 >= (t+1)/2} 的会被当成 {@code 值 - t}，
+     * 再在 Z_q 上做 NTT。所以明文能无损表达的数字范围只有 {@code (-t/2, t/2)}，
+     * 而 t = 65537 时窗口是 (-32768.5, 32768.5)。
+     *
+     * <p>如果用无符号位 {@code [0, B) = [0, 65536)}，凡是 > 32768 的数字都会被静默地
+     * 解释成负数，外部乘积就整体错位（表现为"RGSW(0) 通过、RGSW(1) 全错"）。
+     * 平衡位把每一段限制在 {@code (-B/2, B/2]} = [-32767, 32768]，正好落在窗口内。
+     *
+     * <p>平衡位不会引入近似误差：只要 {@code B^levels / 2 > q}，逐段平衡展开就是精确的
+     * （本例 q ≈ 2^54，B = 2^16，levels = 4，B^4/2 = 2^63 ≫ 2^54，余项必为 0）。
+     * 顺带还把噪声减半。
+     */
     public long[][] decompose(Ciphertext ct, int polyIndex) {
         Ciphertext copy = new Ciphertext();
         copy.copyFrom(ct);
@@ -297,11 +311,24 @@ public final class Mpc4jRgsw {
         long[] data = copy.data();
         long[][] digits = new long[levels][n];
         BigInteger b = BigInteger.valueOf(base);
+        BigInteger half = b.shiftRight(1);                 // B/2
+        BigInteger plainMod = BigInteger.valueOf(t);
+        BigInteger window = BigInteger.valueOf((t - 1) / 2); // 明文窗口上界
         for (int i = 0; i < n; i++) {
-            BigInteger x = crtAt(data, polyIndex, i);
+            BigInteger x = crtAt(data, polyIndex, i);      // 无符号代表元，x ∈ [0, q)
             for (int k = 0; k < levels; k++) {
-                digits[k][i] = x.mod(b).longValueExact();
-                x = x.divide(b);
+                BigInteger r = x.mod(b);                   // [0, B)
+                if (r.compareTo(half) > 0) {
+                    r = r.subtract(b);                     // 居中到 (-B/2, B/2]
+                }
+                if (r.abs().compareTo(window) > 0) {
+                    throw new IllegalStateException(String.format(
+                        "平衡位 %s 超出明文窗口 ±%s：底 B=%d 相对明文模数 t=%d 太大，"
+                            + "请加大 t 或减小底。", r, window, base, t));
+                }
+                // 负数字存成 t + r：MPC4J 的 fast plain lift 会把它还原回负数
+                digits[k][i] = r.signum() < 0 ? r.add(plainMod).longValueExact() : r.longValueExact();
+                x = x.subtract(r).divide(b);               // 继续切下一段
             }
         }
         return digits;
@@ -310,8 +337,9 @@ public final class Mpc4jRgsw {
     /**
      * 外部乘积：RGSW ⊗ RLWE → RLWE。
      *
-     * <p>切段数字 &lt; B = 2^16 = 65536 &lt; t = 65537，正好能作为 Z_t 明文喂给
-     * {@code multiplyPlain}。
+     * <p>切段数字走 {@link #decompose}：平衡位、绝对值 ≤ B/2 = 32768，
+     * 落在明文的 (-t/2, t/2) 窗口内，所以能安全地当 Z_t 明文喂给
+     * {@code multiplyPlain}（MPC4J 会按有符号代表元把它嵌进 Z_q 再做 NTT）。
      */
     public Ciphertext externalProduct(Rgsw rgsw, Ciphertext src) {
         long[][] d0 = decompose(src, 0);
@@ -341,12 +369,27 @@ public final class Mpc4jRgsw {
         evaluator.multiplyPlain(ct, pt, dst);
     }
 
-    /** CMUX：c=0 得 a，c=1 得 b */
+    /**
+     * CMUX：c=0 得 a，c=1 得 b。
+     *
+     * <p>形式统一在这里收尾：外部乘积的累加器在 NTT 域，而调用方传进来的 a/b
+     * 一般是系数域（{@code encrypt} 出来的就是系数域），直接相加会抛
+     * {@code NTT form mismatch}。所以在<b>副本</b>上转 NTT，不动调用方的密文。
+     */
     public Ciphertext cmux(Rgsw rgsw, Ciphertext a, Ciphertext b) {
+        Ciphertext an = toNtt(copyOf(a));
+        Ciphertext bn = toNtt(copyOf(b));
         Ciphertext diff = new Ciphertext();
-        evaluator.sub(b, a, diff);
+        evaluator.sub(bn, an, diff);
         Ciphertext prod = externalProduct(rgsw, diff);
-        return add(a, prod);
+        return add(an, prod);
+    }
+
+    /** 深拷贝一份密文（copyFrom 是 MPC4J 自带的数据拷贝） */
+    private static Ciphertext copyOf(Ciphertext ct) {
+        Ciphertext copy = new Ciphertext();
+        copy.copyFrom(ct);
+        return copy;
     }
 
     public String describe() {

@@ -88,6 +88,30 @@ public final class RlweOps {
         return out;
     }
 
+    /**
+     * 解密"乘积密文"：缩放因子是 Δ²，不是 Δ。
+     *
+     * <p>密文 × 密文 后相位 = Δ²·(m1⊛m2) + 噪声，所以必须除以 Δ² 才能取回消息。
+     * 用 {@link #decrypt} 会得到 Δ·(m1⊛m2) 这种垃圾值。
+     *
+     * <p><b>代价与约束</b>：不做"缩放回 Δ"的话，要求 Δ²·|消息| &lt; q/2，
+     * 即 <b>q 必须小于约 t²/(2·max|消息|)</b>——模数越大反而越不行。
+     * 想在大模数下多次相乘，必须补上标准的 BFV 缩放步骤（借一个额外模数做整除）。
+     */
+    public static long[] decryptProduct(RingParams p, RlweKey key, RlweCiphertext ct) {
+        BigInteger[] ph = phase(p, key, ct);
+        BigInteger q2 = p.q.multiply(p.q);
+        BigInteger t2 = BigInteger.valueOf(p.t).multiply(BigInteger.valueOf(p.t));
+        BigInteger half = q2.shiftRight(1);
+        long[] out = new long[p.n];
+        for (int i = 0; i < p.n; i++) {
+            BigInteger num = ph[i].multiply(t2).add(half);
+            long v = num.divide(q2).longValueExact();
+            out[i] = ((v % p.t) + p.t) % p.t;
+        }
+        return out;
+    }
+
     /** 相位 → 消息：round(相位 · t / q) mod t */
     public static long unscale(RingParams p, BigInteger phase) {
         BigInteger num = phase.multiply(BigInteger.valueOf(p.t)).add(p.q.shiftRight(1));

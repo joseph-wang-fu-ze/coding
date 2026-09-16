@@ -178,7 +178,7 @@ public final class NttContext {
     /** 正向变换到调用方给的缓冲区（热路径复用，避免反复分配） */
     public void forwardInto(long[] a, long[] out) {
         for (int i = 0; i < n; i++) {
-            out[i] = mulMod(a[i], psiPow[i]);
+            out[i] = mul(a[i], psiPow[i]);
         }
         ntt(out, stageW, stageWShoup);
     }
@@ -194,7 +194,7 @@ public final class NttContext {
     public void inverseInplace(long[] a) {
         ntt(a, stageWInv, stageWInvShoup);
         for (int i = 0; i < n; i++) {
-            a[i] = mulMod(a[i], invScale[i]);
+            a[i] = mul(a[i], invScale[i]);
         }
     }
 
@@ -208,14 +208,14 @@ public final class NttContext {
     /** 逐点相乘到指定缓冲区 */
     public void pointwiseInto(long[] a, long[] b, long[] out) {
         for (int i = 0; i < n; i++) {
-            out[i] = mulMod(a[i], b[i]);
+            out[i] = mul(a[i], b[i]);
         }
     }
 
     /** 逐点乘积累加：acc += a ⊙ b */
     public void pointwiseAccumulate(long[] acc, long[] a, long[] b) {
         for (int i = 0; i < n; i++) {
-            acc[i] = addMod(acc[i], mulMod(a[i], b[i]));
+            acc[i] = addMod(acc[i], mul(a[i], b[i]));
         }
     }
 
@@ -248,8 +248,8 @@ public final class NttContext {
         }
     }
 
-    /** Barrett 归约：q = floor(x·μ / 2^64)，再最多两次修正 */
-    private long mulMod(long a, long b) {
+    /** Barrett 归约：q = floor(x·μ / 2^64)，再最多两次修正（对外公开给密文运算用） */
+    public long mul(long a, long b) {
         long x = a * b;                       // < p² < 2^62，不溢出
         long q = Math.multiplyHigh(x, barrettMu);
         long r = x - q * p;
@@ -262,7 +262,8 @@ public final class NttContext {
         return r;
     }
 
-    private long addMod(long a, long b) {
+    /** (a + b) mod p */
+    public long addMod(long a, long b) {
         long s = a + b;
         return s >= p ? s - p : s;
     }

@@ -481,6 +481,72 @@ public final class Mpc4jRgsw {
         return copy;
     }
 
+    /**
+     * RGSW 加密一个<b>任意明文多项式</b> m(X)。
+     *
+     * <p>这是"完成盲旋转"所需的关键原语：有了 RGSW(s(X))（s 是密钥多项式），
+     * 服务器就能在<b>不知道 s</b> 的前提下把一条密文乘上 s——
+     * {@code externalProduct(RGSW(s), Q)} 的相位 = phase(Q)·s(X) ✓。
+     * 这正是 Pirouette/OnionPIR 用来从查询里导出控制位的手法
+     * （MPC4J 的 OnionPIR 里那行 {@code tfhe_cipher.encrypt(secret_key.data(), enc_sk)} 就是这个）。
+     *
+     * <p>约定（与常数版一致，只是把常数换成多项式）：
+     * <pre>
+     *   group0[i] 相位 = g_i·m(X)           ← 把 g_i·m(X) 加到分量 0
+     *   group1[i] 相位 = g_i·m(X)·s(X)      ← 把 g_i·m(X) 加到分量 1（"c1 技巧"自动带上 ·s）
+     * </pre>
+     * <b>注意 group1 不需要乘 s</b>：把同一个量加到"第二个分量"上，相位里就自动多出一个 ·s
+     * （这一点与常数版完全相同，也是常数版根本不碰私钥的原因）。
+     * 一开始我在这里多乘了一次 s，结果 RGSW(1) 都对不上——测试立刻抓出来了。
+     *
+     * <p>实现上 group0/group1 用的都是同一个 NTT 域数组 {@code NTT(m)}，
+     * 借道 {@code transformToNttInplace} 做 fast plain lift 得到（它把系数按有符号代表元
+     * 嵌入 Z_q 再 NTT）。
+     *
+     * <p>⚠️ m 的系数须落在 {@code ±t/2} 内：超出窗口的值会被 fast plain lift 静默当成负数
+     * （这个坑前面已经踩过一次）。
+     */
+    public Rgsw encryptRgswPoly(long[] m) {
+        if (m.length != n) {
+            throw new IllegalArgumentException("明文多项式长度须为 N=" + n);
+        }
+        Plaintext pt = new Plaintext(m);
+        evaluator.transformToNttInplace(pt, context.firstParmsId());
+        long[] mNtt = pt.data();
+
+        Ciphertext[] g0 = new Ciphertext[levels];
+        Ciphertext[] g1 = new Ciphertext[levels];
+        BigInteger power = BigInteger.ONE;
+        BigInteger b = BigInteger.valueOf(base);
+        for (int i = 0; i < levels; i++) {
+            Ciphertext c0 = toNtt(encryptZero());
+            Ciphertext c1 = toNtt(encryptZero());
+            long[] d0 = c0.data();
+            long[] d1 = c1.data();
+            for (int pi = 0; pi < workingPrimeCount; pi++) {
+                long p = primes[pi].value();
+                BigInteger pBig = BigInteger.valueOf(p);
+                long gi = power.mod(pBig).longValue();
+                int off0 = (0 * workingPrimeCount + pi) * n;
+                int off1 = (1 * workingPrimeCount + pi) * n;
+                for (int j = 0; j < n; j++) {
+                    // 同一个量 NTT(g_i · m) = g_i · NTT(m)（逐点）
+                    long scaled = BigInteger.valueOf(gi)
+                        .multiply(BigInteger.valueOf(mNtt[pi * n + j]))
+                        .mod(pBig).longValue();
+                    long s0 = d0[off0 + j] + scaled;
+                    d0[off0 + j] = s0 >= p ? s0 - p : s0;
+                    long s1 = d1[off1 + j] + scaled;   // 加到第二个分量 → 相位自动带 ·s
+                    d1[off1 + j] = s1 >= p ? s1 - p : s1;
+                }
+            }
+            g0[i] = c0;
+            g1[i] = c1;
+            power = power.multiply(b);
+        }
+        return new Rgsw(g0, g1);
+    }
+
     /** 深拷贝一份密文（copyFrom 是 MPC4J 自带的数据拷贝） */
     private static Ciphertext copyOf(Ciphertext ct) {
         Ciphertext copy = new Ciphertext();

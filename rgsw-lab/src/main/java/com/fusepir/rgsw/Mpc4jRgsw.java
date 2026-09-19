@@ -73,6 +73,22 @@ public final class Mpc4jRgsw {
     /** 增量式 CRT 每一步的逆元 */
     private final BigInteger[] crtStepInv;
 
+    /**
+     * 密文实际使用的模数分量个数。
+     *
+     * <p><b>它比 {@code parms.coeffModulus().length} 少一个</b>：BFV 会把最后一个素数留作
+     * 缩放用的特殊素数 {@code q_last}（密文×密文之后要用它做 divide_and_round）。
+     * 所以 N=16384 时"声明 9 个素数 / 438 位"，而密文里只有 8 个分量 / 389 位工作模数。
+     *
+     * <p>踩坑记录：之前按 {@code primes.length}（9）去索引密文数据，在 N=2048
+     * （只有 1 个素数、没有特殊素数）时一直是巧合正确，到论文规模才崩：
+     * {@code ArrayIndexOutOfBoundsException: Index 262144 out of bounds for length 262144}
+     * （262144 = 2 分量 × 8 素数 × 16384）。
+     */
+    public final int workingPrimeCount;
+    /** 声明模数的位宽（含特殊素数），仅用于展示 */
+    public final int declaredQBits;
+
     /** @param unused 保留参数（素数个数由 bfvDefault 自动决定） */
     public Mpc4jRgsw(int n, long t, int unused, int base) {
         this.n = n;
@@ -88,16 +104,37 @@ public final class Mpc4jRgsw {
             throw new IllegalStateException("SEAL 参数无效: " + context.parametersErrorMessage());
         }
         this.primes = parms.coeffModulus();
-        BigInteger prod = BigInteger.ONE;
+        int declaredBits = 0;
+        BigInteger declaredProd = BigInteger.ONE;
         for (Modulus m : primes) {
-            prod = prod.multiply(BigInteger.valueOf(m.value()));
+            declaredBits += m.bitCount();
+            declaredProd = declaredProd.multiply(BigInteger.valueOf(m.value()));
+        }
+        this.declaredQBits = declaredBits;
+
+        this.keyGen = new KeyGenerator(context);
+        this.sk = keyGen.secretKey();
+        this.encryptor = new Encryptor(context, sk);
+        this.decryptor = new Decryptor(context, sk);
+        this.evaluator = new Evaluator(context);
+
+        // 用一条真实密文的数组长度反推"工作层"的素数个数，比猜 API 可靠：
+        // 布局是 [size][coeffModulusSize][n]，所以 coeffModulusSize = length / (size * n)。
+        Ciphertext probeCt = new Ciphertext();
+        encryptor.encryptZeroSymmetric(probeCt);
+        this.workingPrimeCount = probeCt.data().length / (probeCt.size() * n);
+
+        // q 与层数都按"工作模数"算（不含 q_last），否则层数会偏多、白做几层
+        BigInteger prod = BigInteger.ONE;
+        for (int j = 0; j < workingPrimeCount; j++) {
+            prod = prod.multiply(BigInteger.valueOf(primes[j].value()));
         }
         this.q = prod;
         this.qBits = q.bitLength();
 
         BigInteger running = BigInteger.ONE;
-        this.crtStepInv = new BigInteger[primes.length];
-        for (int k = 0; k < primes.length; k++) {
+        this.crtStepInv = new BigInteger[workingPrimeCount];
+        for (int k = 0; k < workingPrimeCount; k++) {
             if (k == 0) {
                 running = BigInteger.valueOf(primes[0].value());
                 continue;
@@ -108,11 +145,6 @@ public final class Mpc4jRgsw {
         }
 
         this.levels = levelsFor(base, q);
-        this.keyGen = new KeyGenerator(context);
-        this.sk = keyGen.secretKey();
-        this.encryptor = new Encryptor(context, sk);
-        this.decryptor = new Decryptor(context, sk);
-        this.evaluator = new Evaluator(context);
     }
 
     private static int levelsFor(int base, BigInteger q) {
@@ -193,7 +225,8 @@ public final class Mpc4jRgsw {
      */
     private void addConstantNtt(Ciphertext ct, int polyIndex, BigInteger g) {
         long[] data = ct.data();
-        int L = primes.length;
+        // 必须用工作层的素数个数（比声明少一个，见 workingPrimeCount 的说明）
+        int L = workingPrimeCount;
         for (int j = 0; j < L; j++) {
             long p = primes[j].value();
             long v = g.mod(BigInteger.valueOf(p)).longValue();
@@ -274,7 +307,8 @@ public final class Mpc4jRgsw {
 
     /** 把源密文某个分量（系数域）的第 i 个系数还原成 Z_q 上的大整数 */
     private BigInteger crtAt(long[] data, int polyIndex, int coeffIndex) {
-        int L = primes.length;
+        // 同样只能用工作层的素数个数：跨素数还原出来的就是密文的实际模数 q（不含 q_last）
+        int L = workingPrimeCount;
         BigInteger x = null;
         BigInteger mv = null;
         for (int j = 0; j < L; j++) {
@@ -404,19 +438,23 @@ public final class Mpc4jRgsw {
 
     public String describe() {
         return String.format(
-            "N=%d, t=%d, primes=%d, q=%d bit, base=%d, levels=%d",
-            n, t, primes.length, qBits, base, levels);
+            "N=%d, t=%d, 声明素数=%d(%d bit) 工作层=%d(%d bit), base=%d, levels=%d",
+            n, t, primes.length, declaredQBits, workingPrimeCount, qBits, base, levels);
     }
 
     // ---------------- 自检 ----------------
 
     public static void main(String[] args) {
+        int n = args.length > 0 ? Integer.parseInt(args[0]) : 2048;
         System.out.println("=== RGSW on top of MPC4J (BFV) ===");
-        // MPC4J 的 Galois 工具在每层模数上分配 N^2 个整数，素数多了会 OOM；
-        // 实测 N=1024 + 2 素数很轻松，够验证逻辑。
-        // N=2048 + bfvDefault：模数约 54 位，噪声预算足够容纳外部乘积
-        // （N=1024 只能装约 27 位，噪声会超预算；这是 SEAL 的 128-bit 安全下限决定的）
-        Mpc4jRgsw m = new Mpc4jRgsw(2048, 65537L, 0, 1 << 16);
+        // N 默认 2048（跑得快）；传参可跑论文规模，例如 16384。
+        // 注意：以前 N 大到 16384 会 OOM——原因是 Galois 置换表被预分配成 N 行
+        // （AbstractGaloisTool:64 的 new int[N][N]），补丁改成惰性行分配后已无此限制
+        // （N=16384、8 层：8.6 GB → 约 14 MB）。
+        long tCtx = System.nanoTime();
+        Mpc4jRgsw m = new Mpc4jRgsw(n, 65537L, 0, 1 << 16);
+        System.out.printf("[ctx] N=%d，上下文 + 密钥生成 %.0f ms%n",
+            n, (System.nanoTime() - tCtx) / 1e6);
         System.out.println("[params] " + m.describe());
         System.out.println();
 

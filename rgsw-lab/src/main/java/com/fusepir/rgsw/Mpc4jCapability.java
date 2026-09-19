@@ -36,8 +36,12 @@ public class Mpc4jCapability {
     private static int failed = 0;
 
     public static void main(String[] args) {
+        int n = args.length > 0 ? Integer.parseInt(args[0]) : 4096;
         System.out.println("=== MPC4J RLWE 能力探针 ===");
-        Mpc4jRgsw m = new Mpc4jRgsw(4096, 65537L, 0, 1 << 16);
+        long tCtx = System.nanoTime();
+        Mpc4jRgsw m = new Mpc4jRgsw(n, 65537L, 0, 1 << 16);
+        System.out.printf("[ctx] N=%d，上下文 + 密钥生成 %.0f ms%n",
+            n, (System.nanoTime() - tCtx) / 1e6);
         System.out.println("[params] " + m.describe());
         System.out.println();
 
@@ -143,8 +147,8 @@ public class Mpc4jCapability {
             ev.modSwitchToNextInplace(ctS);
             gotS = decode(ev, dec, encoder, ctS, m.n);
             switchOk = diff(a, gotS) == 0;
-            switchNote = String.format("素数 %d 个 → %d 个，噪声余量 %s → %s bit",
-                m.primes.length, ctS.size() > 0 ? m.primes.length - 1 : m.primes.length,
+            switchNote = String.format("工作层素数 %d 个 → %d 个，噪声余量 %s → %s bit",
+                m.workingPrimeCount, m.workingPrimeCount - 1,
                 noiseBeforeSwitch < 0 ? "n/a" : String.valueOf(noiseBeforeSwitch),
                 noise(dec, ctS) < 0 ? "n/a" : String.valueOf(noise(dec, ctS)));
         } catch (OutOfMemoryError | Exception e) {

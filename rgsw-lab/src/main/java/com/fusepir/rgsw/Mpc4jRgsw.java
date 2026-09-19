@@ -429,6 +429,58 @@ public final class Mpc4jRgsw {
         return add(an, prod);
     }
 
+    /**
+     * 把密文乘上<b>公开</b>单项式 X^k（负循环环 Z_q[X]/(X^N+1)）。
+     *
+     * <p>盲旋转两处都要它：每轮 CMUX 前后按 LWE 系数 a_i 旋转累加器，最后再按公开量旋一次。
+     * 这是纯系数搬移，不需要任何密钥。
+     *
+     * <p>符号约定（环里 X^N = −1）：先把 k 按 mod 2N 约化；k ≥ N 等价于整体取负再平移 k−N；
+     * 平移过程中跨过 X^N 的项也要变号——两个条件异或决定最终符号。
+     * 与 native 侧 {@code index_pir.cpp} 里的 {@code negacyclic_shift_poly_coeffmod} 同一约定，
+     * 也与路线 C 上已通过测试的 {@code MonomialOps} 一致。
+     *
+     * <p>注意逐<b>工作层</b>素数做（BFV 的 q_last 不在密文里，见 workingPrimeCount）。
+     */
+    public Ciphertext multiplyPowerOfX(Ciphertext ct, long k) {
+        boolean wasNtt = ct.isNttForm();
+        Ciphertext copy = new Ciphertext();
+        copy.copyFrom(ct);
+        if (wasNtt) {
+            evaluator.transformFromNttInplace(copy);
+        }
+        long twoN = 2L * n;
+        long kk = ((k % twoN) + twoN) % twoN;
+        boolean negate = kk >= n;
+        int shift = (int) (kk % n);
+        int size = copy.size();
+        long[] data = copy.data();
+        long[] src = new long[n];
+        for (int c = 0; c < size; c++) {
+            for (int j = 0; j < workingPrimeCount; j++) {
+                long p = primes[j].value();
+                int off = (c * workingPrimeCount + j) * n;
+                System.arraycopy(data, off, src, 0, n);
+                for (int i = 0; i < n; i++) {
+                    int t = i + shift;
+                    boolean wrap = t >= n;
+                    if (wrap) {
+                        t -= n;
+                    }
+                    long v = src[i];
+                    if (negate ^ wrap) {
+                        v = (v == 0) ? 0 : p - v;
+                    }
+                    data[off + t] = v;
+                }
+            }
+        }
+        if (wasNtt) {
+            evaluator.transformToNttInplace(copy);
+        }
+        return copy;
+    }
+
     /** 深拷贝一份密文（copyFrom 是 MPC4J 自带的数据拷贝） */
     private static Ciphertext copyOf(Ciphertext ct) {
         Ciphertext copy = new Ciphertext();

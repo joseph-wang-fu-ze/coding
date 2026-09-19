@@ -7,6 +7,41 @@
 > 另有 native 对照路线（真 SEAL 4.0.0，仅用于性能对照与交叉校验）与已弃用的自研路线。
 > 三者的边界见 [`默认实现一览.md`](默认实现一览.md)，路线审计见 [`RLWE路线审计.md`](RLWE路线审计.md)。
 
+---
+
+# ⚠️ 默认使用哪个文件夹（先看这个，别拿错）
+
+**一句话**：默认路线是**纯 Java**——**库在 `lib/`**，**实现的代码在 `rgsw-lab/` 与 `lwe-java/`**。
+三份"看起来都像"的东西里只有一份是默认的，其余是对照或弃用。
+
+| 功能 / 论文子程序 | ✅ **默认用这个文件夹** | 入口（文件 → 方法） | ❌ **不要用** |
+|---|---|---|---|
+| **RLWE 层**：`RLWE.Enc/Dec`、`CtCtAdd`、`CtPtMul`、**`CtCtMul`**、**`CtRotate`**、模数切换 | 库 **`lib/`** + 调用代码 **`rgsw-lab/`** | `lib/mpc4j-crypto-fhe-seal.jar`（**已打补丁**）<br>`rgsw-lab/.../Mpc4jRgsw.java`：<br>· `encrypt` / `decrypt`<br>· `add` / `sub` / `scalarMultiply`<br>· `multiplyPowerOfX` = **CtRotate**<br>· CtCtMul 用 `m.evaluator.multiply` + `relinearizeInplace`<br>· 旋转/模切换用 `m.evaluator.rotateRowsInplace` / `modSwitchToNextInplace` | ❌ **`rlwe-java/`**（自研，**已弃用**，缺缩放回落）<br>🔵 `native-jni/`（真 SEAL，**仅对照**） |
+| **LWE 层**：`LWE.Enc/Dec`、模数切换 | **`lwe-java/`** | `src/main/java/cape/he/LWE.java`：`keyGenBinary` / `encrypt` / `decrypt`<br>`LWECiphertext.switchModulus` | ❌ 没有第二份。MPC4J 全仓库没有 LWE，**别去别处找** |
+| **RGSW**：`RGSW.Enc`、外部乘积、`CMUX` | **`rgsw-lab/`** | `Mpc4jRgsw.java`：<br>· `encryptRgswConstant(μ)`（比特选择器 / 自举密钥）<br>· `encryptRgswPoly(m)`（一般多项式，`enc_sk` 用）<br>· `externalProduct(rgsw, ct)`<br>· `cmux(rgsw, a, b)` | ❌ `rgsw-lab/` 里的 `RgswOps.java`、`RgswCiphertext.java`、`MonomialOps.java`、`BootstrapKey.java`、`LabConfig.java`、`RgswLabMain.java`、`MonomialKeyTest.java`、`examples/RlweDemo.java`（**路线 C，已加弃用横幅**） |
+| **`BlindRotate`** | **`rgsw-lab/`** | `BlindRotateOps.java`：`blindRotateByBits`（论文位口径）/ `blindRotate`（经典 d 轮）<br>`BlindRotateComplete.java`（端到端完整版） | ❌ 无替代 |
+| **`SampleExtract_j`** / **`Pack`** | **`rgsw-lab/`** | `LweRlweBridge.java`：`sampleExtract` / `packFromSample` / `decryptSampleViaPack` | ❌ 无替代（两者是互逆映射，故意写在同一文件里） |
+| **`LWEtoRGSW`** | **`rgsw-lab/`**（❌ **未通过**） | `LweToRgswOps.java`：`convert` | — |
+| **数据库预处理**（明文侧：BFF / Bloom / 载荷） | **`cape-fusepir-database-handoff/`** | `DatabasePreprocessor.java`、`BloomParameters.java`、`PlaintextPayload.java` | — |
+| 参数位宽 / 性能测量 | `param-probe/`、`rlwe-bench/` | — | — |
+
+**为什么 RLWE 的"默认"是两处**：**库**（那个 jar）在 `lib/`，而**调用它的代码**在 `rgsw-lab/`
+（`Mpc4jRgsw.java` 就是 RLWE 层的门面）。`rlwe-java/` 是**最早的自研版**，不是默认。
+
+**最容易搞混的六处**：
+
+1. **两个都叫 `lib` 的目录**：`coding/lib/` 是**Java jar**（默认）；`coding/native-jni/lib/` 是**真 SEAL 的 DLL**（仅对照）。
+2. **`coding/rlwe-java/` 不是默认的 RLWE**——默认的 RLWE 调用代码在 **`coding/rgsw-lab/`**。
+3. **两套 RGSW**：`Mpc4jRgsw.java`（默认）vs `RgswOps.java`（弃用）。
+4. **`rgsw-lab/` 里有两个 run 脚本**：`run-mpc4j.ps1`（**默认入口**）vs `run.ps1`（路线 C，顶部有 `LEGACY - ROUTE C ONLY` 警示）。
+5. **LWE 只有一份**：`coding/lwe-java/`。
+6. **"MPC4J 的 SEAL"有两种形态**：`lib/mpc4j-crypto-fhe-seal.jar` 是**逐类翻译的 Java 重写**；`native-jni/lib/mpc4j-native-fhe.dll` 是**真 SEAL 的 C++ JNI 封装**。两者语义一致，但性能与内存上限不同。
+
+> 库的门面（`Mpc4jRgsw`）同时承载 RLWE 与 RGSW 两个子程序，这是**故意的**：
+> RGSW 必须在 RLWE 之上才能写，拆成两个文件会逼出大量重复代码。
+
+---
+
 本文按论文的协议四步组织：**SETUP → QUERY → ANSWER → DECODE**。
 
 ---

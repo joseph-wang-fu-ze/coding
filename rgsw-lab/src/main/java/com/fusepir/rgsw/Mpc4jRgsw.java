@@ -547,6 +547,33 @@ public final class Mpc4jRgsw {
         return new Rgsw(g0, g1);
     }
 
+    /**
+     * 密文标量乘：所有分量、所有工作素数的系数都乘上公开常数 k（mod 各素数）。
+     *
+     * <p>NTT 是线性的，所以"先 NTT 再逐点乘 k"与"先乘 k 再 NTT"等价——
+     * 因此在 NTT 域直接逐点乘即可，不需要来回转换形式。
+     * 用途：{@link LweToRgswOps} 里把 {@code RLWE(μ)} 缩放成 {@code (g_i·Δ⁻¹)·RLWE(μ)}。
+     */
+    public Ciphertext scalarMultiply(Ciphertext ct, BigInteger k) {
+        Ciphertext out = new Ciphertext();
+        out.copyFrom(ct);
+        long[] data = out.data();
+        int size = out.size();
+        for (int c = 0; c < size; c++) {
+            for (int pi = 0; pi < workingPrimeCount; pi++) {
+                long p = primes[pi].value();
+                BigInteger pBig = BigInteger.valueOf(p);
+                long km = k.mod(pBig).longValue();
+                int off = (c * workingPrimeCount + pi) * n;
+                for (int j = 0; j < n; j++) {
+                    data[off + j] = BigInteger.valueOf(data[off + j])
+                        .multiply(BigInteger.valueOf(km)).mod(pBig).longValue();
+                }
+            }
+        }
+        return out;
+    }
+
     /** 深拷贝一份密文（copyFrom 是 MPC4J 自带的数据拷贝） */
     private static Ciphertext copyOf(Ciphertext ct) {
         Ciphertext copy = new Ciphertext();

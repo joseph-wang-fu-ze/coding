@@ -1,3 +1,9 @@
+/*
+ * !!! ROUTE C - self-built RLWE, DEPRECATED, NOT THE DEFAULT !!!
+ *
+ * Default (route B): Mpc4jRgsw.java / BlindRotateOps.java on coding/lib/mpc4j-crypto-fhe-seal.jar.
+ * This demo is kept only as a cross-check tool. See coding/RLWE路线审计.md.
+ */
 import com.fusepir.rlwe.*;
 import com.fusepir.rgsw.*;
 

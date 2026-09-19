@@ -1,5 +1,18 @@
 package com.fusepir.rgsw;
 
+/*
+ * !!! ROUTE C - self-built RLWE, DEPRECATED, NOT THE DEFAULT !!!
+ *
+ * Default implementation (route B): the sibling Mpc4jRgsw.java (RGSW / external
+ * product / CMUX) and BlindRotateOps.java (blind rotation). They run on
+ * coding/lib/mpc4j-crypto-fhe-seal.jar - MPC4J's pure-Java SEAL port, patched so
+ * that the Galois permutation tables are lazily allocated - and are verified at
+ * the paper's parameters (N=16384, t=65537, 9 declared primes).
+ *
+ * This file is kept only as a cross-check tool. See coding/RLWE路线审计.md.
+ */
+
+
 import com.fusepir.rlwe.*;
 
 /**

@@ -1,4 +1,15 @@
 # ============================================================================
+#  !! LEGACY - ROUTE C ONLY !!
+#  Compiles rgsw-lab together with the sibling rlwe-java module (com.fusepir.rlwe,
+#  self-built, deprecated) and runs RgswLabMain. This is NOT the default path.
+#
+#  DEFAULT PATH:  .\run-mpc4j.ps1        (RGSW / CMUX / blind rotation)
+#                 .\run-mpc4j.ps1 -Class com.fusepir.rgsw.Mpc4jCapability
+#                 .\run-mpc4j.ps1 -Class com.fusepir.rgsw.BlindRotateOps
+#  It runs on coding/lib/mpc4j-crypto-fhe-seal.jar (MPC4J's SEAL Java port).
+#  Kept only as a cross-check tool. See coding/RLWE路线审计.md
+# ============================================================================
+# ============================================================================
 #  RGSW lab runner
 #
 #  Usage:

@@ -150,7 +150,7 @@ public final class LweRlweBridge {
             bk[i] = m.encryptRgswConstant((index >>> i) & 1L);
         }
         Ciphertext acc = m.encrypt(msg);
-        Ciphertext out = BlindRotateOps.blindRotateByBits(m, bk, acc, index);
+        Ciphertext out = BlindRotateOps.blindRotateByBits(m, bk, acc);
         long[][] extracted = sampleExtract(m, out, 0);
         long got = decryptSampleViaPack(m, extracted, 0);
         failed += report("2  整条链：逐位 RGSW → 盲旋转 → SampleExtract_0 → Pack → 解密",

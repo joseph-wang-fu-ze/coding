@@ -163,7 +163,7 @@ CRT 逆元预计算、小系数快路径、三元专用乘法。
 
 | # | 缺什么 | 为什么必须要 | 成本 |
 |---|---|---|---|
-| 1 | **密文 × 密文乘法（CtCtMul）** | CAPE 的列选择与加密 Bloom 得分都是密文×密文（论文 Algorithm 2 第 4 行明确是 `CtCtMul`） | 约 30 行（NTT 域三次乘法） |
+| 1 | **密文 × 密文乘法（CtCtMul）** | CAPE 的**加密 Bloom 得分**用它（论文 Algorithm 2 第 4 行 `ct_score,j ← CtCtMul(q_BF, ct_j^BF)`）。<br>⚠️ **更正（2026-09-19）**：此处原先写"列选择也是密文×密文"是**错的**——论文 §2.5 明说 `CtCtAdd`/`CtPtMul` 用于 FusePIR 的**加密选择**，`CtCtMul` 是 CAPE "additionally" 用于 Bloom 得分的。列选择是**密文×明文** | 约 30 行（NTT 域三次乘法） |
 | 2 | **重线性化** | CtCtMul 产生三元密文，必须重线性化回二元 | 约 60 行（**可复用已有的切段机制**：生成 s² 的重线性化密钥，把 c2 切段累加） |
 | 3 | **槽位打包 + 槽位旋转** | Bloom 内积是"逐位相乘再旋转求和"，属于槽位域运算 | 约 180 行（BFV batch 编码 + Galois 密钥 + 旋转后 key switch） |
 | 4 | **序列化 + 通信量统计** | CAPE 要报 query/response 大小 | 约 80 行 |

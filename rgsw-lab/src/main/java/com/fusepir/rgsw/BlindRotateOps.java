@@ -14,19 +14,23 @@ import java.util.Random;
  *
  * <h3>两种等价口径（本文件都实现，用于互相验证）</h3>
  * <ol>
- *   <li><b>按索引位（论文/Pirouette 的实际结构）</b>：{@link #blindRotateByBits}。
+ *   <li><b>按索引位（压缩变体 CAPE-C / FusePIR-C 的结构）</b>：{@link #blindRotateByBits}。
  *       r = Σ z_i·2^i，于是
  *       <pre>X^{−r} = Π_i X^{−z_i·2^i}   →   每轮 ACC ← CMUX(RGSW(z_i), ACC, ACC·X^{−2^i})</pre>
  *       共 <b>⌈log₂N⌉</b> 轮（N=16384 → 14），自举密钥 = 14 个 RGSW。
  *       Pirouette §4.1 原文：{@code ct_k ← LWEtoRGSW(c̃t_k), ∀k ∈ [0, log(N)−1]}，
  *       {@code {RGSW(idx_i)}_{i∈[0,⌈log2 N⌉−1]}} 用作 CMUX 控制位。</li>
- *   <li><b>按秘密位（教科书 CGGI）</b>：{@link #blindRotate}。
+ *   <li><b>按秘密位（教科书 CGGI，= CAPE / FusePIR 的结构）</b>：{@link #blindRotate}。
  *       {@code X^{−r} = X^{−b}·Π_i X^{a_i·s_i}}，每轮 {@code CMUX(RGSW(s_i), ACC, ACC·X^{a_i})}
  *       后再补一次公开旋转 {@code X^{−b}}。共 <b>d</b> 轮（d = LWE 维数 = 512），
  *       自举密钥 = d 个 RGSW。</li>
  * </ol>
  * 两者数学等价（{@code Σ a_i s_i − b ≡ −r}），但代价差 d/⌈log₂N⌉ ≈ 37 倍。
- * <b>论文的结构是口径 1</b>；口径 2 保留作为交叉校验。
+ * <b>论文（CAPE/FusePIR）的结构是口径 2</b>——因为它的 {@code ct_L} 就是一条 LWE 密文；
+ * 口径 1 属于 CAPE-C/FusePIR-C（控制位需由 {@code LWEtoRGSW} 产出），本文件保留它作交叉校验。
+ *
+ * <p><b>两个函数都不接收明文索引</b>：口径 2 收 LWE 密文 {@code (a, b)}；
+ * 口径 1 收逐位 {@code RGSW} 控制位 + 公开的 2^i 步长。验收代码需要的期望值要自己另外带。
  *
  * <p>剩余缺口：口径 1 需要"把一条 LWE 密文同态地分解成逐位 LWE 密文"（Pirouette 的
  * Alg.3 {@code BitDecomp}，参数见其 Table 3：n_in=1300、n_out=600、B=2¹⁴、B_ksk=2³）。
@@ -41,11 +45,16 @@ public final class BlindRotateOps {
     /**
      * 口径 1（论文结构）：按<b>索引位</b>轮，每轮旋转步长为 −2^i。
      *
+     * <p><b>注意这个函数不收索引</b>：索引不以任何形式（明文或密文）作为参数进来。
+     * 每轮的旋转步长 {@code −2^i} 是<b>公开常数</b>，"这一轮要不要转到 X^{−2^i}"完全由
+     * {@code bkBits[i] = RGSW(z_i)} 这条密文在 {@link Mpc4jRgsw#cmux} 里决定。
+     * 因此调用方（例如验收代码）如果想知道期望结果 {@code p_r}，需要自己另外带着 {@code r}——
+     * <b>绝不要把明文 {@code r} 传进协议路径</b>。
+     *
      * @param bkBits 长度须为 ⌈log₂N⌉，第 i 个是 {@code RGSW(z_i)}，z_i 为索引第 i 位
-     * @param index  仅供测试/对照使用（真实场景下控制位来自 BitDecomp + LWEtoRGSW）
+     *               （真实的控制位来自 BitDecomp + LWEtoRGSW）
      */
-    public static Ciphertext blindRotateByBits(Mpc4jRgsw m, Mpc4jRgsw.Rgsw[] bkBits, Ciphertext acc,
-                                               long index) {
+    public static Ciphertext blindRotateByBits(Mpc4jRgsw m, Mpc4jRgsw.Rgsw[] bkBits, Ciphertext acc) {
         Ciphertext cur = acc;
         for (int i = 0; i < bkBits.length; i++) {
             // z_i = 1 时把 ACC 乘 X^{−2^i}：z_i=0 保持，z_i=1 旋转 → 合起来得到 X^{−Σ z_i 2^i}
@@ -114,7 +123,7 @@ public final class BlindRotateOps {
             L, bkBits[0].size(), (double) bkBitsMs);
 
         t0 = System.nanoTime();
-        Ciphertext out1 = blindRotateByBits(m, bkBits, acc, index);
+        Ciphertext out1 = blindRotateByBits(m, bkBits, acc);
         long t1 = ms(t0);
         long[] got1 = m.decrypt(out1);
         long want = p[(int) (index % n)];
@@ -175,7 +184,7 @@ public final class BlindRotateOps {
             Lbig, bkBig[0].size(), ctBytes / 1048576.0, bkMB, (double) bkBigMs);
 
         t0 = System.nanoTime();
-        Ciphertext outBig = blindRotateByBits(big, bkBig, accBig, idxBig);
+        Ciphertext outBig = blindRotateByBits(big, bkBig, accBig);
         long brBigMs = ms(t0);
         long[] gotBig = big.decrypt(outBig);
         long wantBig = msg[(int) (idxBig % N)];

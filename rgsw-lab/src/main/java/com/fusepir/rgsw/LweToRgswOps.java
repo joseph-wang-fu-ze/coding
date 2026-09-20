@@ -188,7 +188,7 @@ public final class LweToRgswOps {
             long beta = Math.floorMod(sum + (zj == 1 ? qL / 2 : 0), qL);
             controls[j] = convert(m, bk, a, beta, encSk);   // ← 服务器只看到 (a, β)
         }
-        Ciphertext out = BlindRotateOps.blindRotateByBits(m, controls, acc, index);
+        Ciphertext out = BlindRotateOps.blindRotateByBits(m, controls, acc);
         long[] got = m.decrypt(out);
         failed += report("2  论文要求的位驱动盲旋转（控制位全部来自 LWEtoRGSW）",
             got[0] == payload[(int) index],

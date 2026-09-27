@@ -24,6 +24,16 @@
 > 这关闭了缺口"(a) 列选择的累加器能不能喂给盲旋转"，并顺带抓出+修掉一个真 bug
 > （**`a_i ≡ 0 (mod 2N)` 会让 CMUX 抛 `transparent`**，d=512 时约 12% 概率撞上）——见**附录 A 第 9 条**。
 > **仍然不成立的只有索引噪声那一条。**
+>
+> **✅ 2026-09-27 的进展（实测，见 5.2 ④~⑥）**：**论文的 `Pack` 做出来了。**
+> 原语正式名字 = **Ring Packing / `RLWE-Pack`**（奠基 **CDKS21 = ePrint 2020/015**，CT-RSA 2021；
+> YPIR / LOHEN / InsPIRe 只是使用者）。实现 = `rgsw-lab/RingPack.java`，**N=8192 实测 6/6**：
+> 多条 LWE 比特 → **一个** RLWE 密文、**每位独占一个槽位**（槽位错 0、泄漏 0），
+> 并且打包产物**直接**喂 `BloomScoring` 就得到正确的 ⟨b_qry, b_v⟩（含负对照）。
+> **A 清单里唯一带研究不确定性的项（A4）到此闭合。**
+> 顺带定下两条参数事实：**`N = 8192` 起步**（4096 时打包过、打分崩）；
+> `SwK` 规模逼迫**放弃 LWE-in-RLWE**、改用论文 SETUP 写的 `sk = (s_L, s_R)`。
+> 调研与实测全文：[`rgsw-lab/LWE_RLWE打包_RingPack_调研.md`](rgsw-lab/LWE_RLWE打包_RingPack_调研.md)。
 
 ---
 
@@ -530,6 +540,120 @@ r ∈ [0, R),  R ≤ N
 **一句话现状**：**四步的密码学骨干已经串通一环（ANSWER 链路）**，缺的是 QUERY 客户端逻辑、DECODE 编排、Bloom 打分，
 以及两件非编排的事：**索引噪声机制（R3b）** 与 **BK 体积（R6）**。
 
+### 5.2 Bloom 打分（二进制同态内积）已实现并验证（2026-09-27）
+
+**先说结论：二进制同态内积只能在【槽位域】做，而且现在能跑了。**
+
+#### ① 裁决实验 `BloomInnerProductProbe`（N=4096）
+
+| 域 | `CtCtMul` 是 | 折叠后得到 | 可用 |
+|---|---|---|---|
+| **槽位**（`BatchEncoder`） | 逐槽相乘 = 按位 AND | **每个槽 = ⟨a,b⟩** | ✅ 0/4096 错位 |
+| **系数** | 多项式乘法 = 卷积 | 一个**无意义的数** | ❌ 四组向量**全部**得不到内积 |
+
+> 我原先推的"系数域会得到 `|a|·|b|`"**也是错的**——那个推导漏了 `X^N+1` 的约化。
+> 实测结论是：系数域折叠出来的值**既不是内积、也不是重量之积**，随向量对乱变。
+
+#### ② 实现 `BloomScoring`（5/5 通过）
+
+```
+客户端  qBF = BloomScoring.encryptBloomVector(m, b_qry)          ← 编成槽位密文
+服务端  score = BloomScoring.bloomScore(m, gk, qBF, ct_j_BF)     ← CtCtMul + 折叠
+        每个槽都等于 s_j = ⟨b_qry, b_vj⟩
+判定    s_j == τ 接受；s_j < τ 拒绝（τ = ‖b_qry‖₁，客户端本地保留）
+```
+
+| 用例 | s | 期望 | 结论 |
+|---|---|---|---|
+| C1 命中候选（含 b_qry 全部位） | **586** | τ = 586 | ✅ 接受 |
+| C2 候选 = b_qry 本身 | **586** | τ | ✅ 接受 |
+| C3 漏 1 位 | **585** | τ−1 | ✅ 拒绝 |
+| C4 漏 5 位 | **581** | τ−5 | ✅ 拒绝 |
+| C5 空候选 | **0** | 0 | ✅ 拒绝 |
+
+折叠后**每个槽都等于总分**（不一致槽 0/4096），单次 30~143 ms。
+
+#### ③ 实测踩到的两个硬约束
+
+| 约束 | 说明 |
+|---|---|
+| **N ≥ 4096** | `CtCtMul` 要重线性化，而重线性化需要密钥切换 ⇒ **≥2 个工作素数**。N=2048 的 `bfvDefault` 只给 1 个素数，直接抛 `keyswitching is not supported by the context`。**这是"Bloom 打分"对规模的下限要求**，与小规模跑通的其他环节（N=2048 够用）不同 |
+| **Galois 步长 < N/2** | `getEltFromStep` 在**步长绝对值 ≥ N/2** 时抛 `step count too large`。所以折叠要写成"**行内平移到 N/4 + 一次列旋转**"，不能直接用 `N/2` |
+
+#### ④ ✅ 最后一环已补齐：候选的 Bloom 怎么进槽位（= 论文的 `Pack`）
+
+`bloomScore` 要求 `ct_j^BF` **已经在槽位域**。而候选的 Bloom 是从载荷里检索出来的：载荷按
+**行号 = 系数下标**摆放（`P_{c,b}(X) = Σ_r D[r+cR][b]·X^r`），`BlindRotate` + `SampleExtract`
+出来的是**一条条 LWE 密文**（一位一条）。
+
+**把 LWE 密文变成槽位密文 = 论文的 `Pack`。** 它**不是**几行代码，但**已经做出来了**：
+原语的正式名字是 **Ring Packing / `RLWE-Pack`**（奠基 = **CDKS21**, ePrint 2020/015），
+实现见 `rgsw-lab/RingPack.java`，调研与实测见 `rgsw-lab/LWE_RLWE打包_RingPack_调研.md`。
+
+#### 目标逐条检查（`PackGoalCheck`，N=4096）——**旧的 `packFromSample` 四条全部未达成**
+
+目标：*"把多条『只加密一个比特』的 LWE 密文，安全正确地打包成**一个** RLWE 密文，
+且**每位对应一个槽位**，以便做 SIMD 二进制同态内积。"*
+
+| 子目标 | `packFromSample` 的实测结论 | 证据 |
+|---|---|---|
+| **G1 多样性**：一次吃**多条** | ❌ **接口就不支持** | 只有 `packFromSample(m, sample, j)`——吃**一条**样本 + **一个**系数下标，没有批量入口 |
+| **G2 落点**：落在**槽位** | ❌ **落在系数** | **系数视图命中**（系数 0 = 1 ✓）；**槽位视图 4096 个槽里命中 0 个** |
+| **G3 合流**：多条摆好后**相加** | ❌ **相加即全毁** | 单独看每条都对（1/2/3）；相加后**系数 0 = 61215（应 1）、系数 1 = 746（应 2）、系数 2 = 7330（应 3）**——每条样本的 `c1·s` 在**所有**系数上产生**满量级污染**（不是噪声） |
+| **G4 可用性**：喂给槽位域打分 | ❌ **算不出内积** | ⟨q,v⟩ = **274**；槽位域输入得 **274** ✓、**系数域输入得 19618** ✗ |
+
+**所以 `packFromSample` 是 `SampleExtract` 的**逆**（单样本 ↔ 单个系数），
+只能用于**验证往返**（`AnswerPathMini` 靠它，0 错位）——它**本来就不是** `Pack`。**
+`Pack` 是**另一个原语**，已由 `RingPack` 独立实现（见下）。
+
+#### ⑤ 为什么"系数摆放"必然失败、`RingPack` 怎么做
+
+**根因**：`packFromSample` 摆出来的相位**不是纯常数**——在 `m = j` 处是消息，**在 `m ≠ j` 处是满量级污染**。
+而"槽位"是相位的**求值**（NTT）：一个"只有一个系数非零"的多项式，它的求值是**铺满所有槽**的。
+所以没有任何槽等于消息（实测 0/4096 命中）。
+
+**正确的做法：从一开始就在槽位域构造【纯常数】。**
+
+```
+SwK[j][k] = RLWE( B^k · s_j mod t )        把 LWE 私钥系数当【常数】加密（NTT 域）
+sum       = Σ_j Σ_k d_{j,k} · SwK[j][k]    消息 = ⟨a,s⟩  ← 纯常数
+sum      -= b                               用「常数明文 × RLWE(1)」实现
+sum       = −sum                            消息 = b − ⟨a,s⟩ = m  ← 纯常数
+selected  = sum ⊗ E_i                       只落在槽 slots[i]（E_i = 槽 i 为 1 的明文多项式）
+packed    = Σ_i selected                    ⇒ 槽 i 解出来就是 m_i ✓
+```
+
+**"纯常数"是全部关键**：只有相位是常数，乘槽位选择子 `E_i` 才**不会**把别处的值带进来。
+
+#### ⑥ `RingPack` 实测（N = 8192，**6/6 通过**）
+
+跑法：`cd coding\rgsw-lab; .\run-mpc4j.ps1 -Class com.fusepir.rgsw.RingPack 8192 32`
+
+| 项 | 内容 | 结果 |
+|---|---|---|
+| **P1** | 16 条 LWE 比特 → 1 个 RLWE 密文 | ✅ 槽位错 **0**、未写入槽非零 **0** |
+| **P2** | 打包产物**直接**喂 `BloomScoring` | ✅ ⟨q,v⟩ = 5，算出 **5** ← **A4 的判据** |
+| **P3** | 负对照：查询平移一格 | ✅ 期望 4、算出 **4** ≠ 5（排除常数巧合） |
+| **P4** | LWE 维数扫 `n = 8/32/128/512` | ✅ 全对；`n=512` → `SwK` 1536 条、打包 32 s |
+| **P5a** | 缩放后样本走同态路径 | ✅ **精确搬运**（= 整数侧残差，0 误差） |
+| **P5b** | 缩放噪声随 `n` 增长 | ✅ `n=8192` 最大偏差 **66** vs 半窗 32768（**496 倍**余量） |
+
+**两个新参数事实**：
+- **`N = 4096` 不够**：打包（P1）过，但打分侧（多一次 `CtCtMul` + 重线性化 + 折叠）噪声崩掉。
+  **`N = 8192` 起步**（4 个工作素数 / 174 bit）。
+- **缩放不是障碍**：`round(b·t/q) − Σ round(a_j·t/q)·s_j` 的偏差 ~ `√n·0.3`，到真实量级 `n = N = 8192` 也只有 66。
+
+**⚠️ 与论文的差距（明确标注：原型，不是协议级）**：本原型 LWE 模数取 `t`、样本是合成的。
+真实链路 `SampleExtract → 缩放 → Pack` 里**缩放已单独验证（P5）**，
+剩下的是**把 `n` 从 512 提到 `N` 的工程量**——`n = N = 8192` 时 `SwK` 约 **12 GB**，
+**必须放弃 LWE-in-RLWE、改用论文 SETUP 写的 `sk = (s_L, s_R)` 独立密钥**。
+这是**参数选择问题，不是未知**。
+
+> **所以 A4 的状态是**：**✅ 闭合**（打分 + 打包都实现并端到端验证）。
+> 剩下的（`b_qry` 的客户端编排、多候选批量布局、`ℓ_BF > N` 时分段）归 A3/A5 与 R7。
+> 另外"改 Setup 里 Bloom 的存储方式"**解决不了**这个问题——存储的密度（一位一个 block）
+> 和顺序（连续递增）**都已经是对的**，槽位坐标是密文层的属性，Setup 碰不到。
+
 ---
 
 # 六、项目结构
@@ -555,11 +679,15 @@ r ∈ [0, R),  R ≤ N
 | `Mpc4jCapability.java` | 四项能力探针（打包 / ct×ct+重线性化 / 旋转 / 模数切换） |
 | `BlindRotateOps.java` | **`BlindRotate`** 两种口径（**d 轮 = CAPE**；逐索引位 = CAPE-C） |
 | `BlindRotateComplete.java` | 完整盲旋转（真实载荷 + 加密索引，端到端 4 项验收） |
-| `LweRlweBridge.java` | **`SampleExtract_j`** + **`Pack`**（q_R 下的互逆映射，同一文件）；含 `crtCentered` |
+| `LweRlweBridge.java` | **`SampleExtract_j`** + 它的**逆映射** `packFromSample`（q_R 下的单样本 ↔ 单系数互逆，同一文件）；含 `crtCentered`。**⚠️ `packFromSample` 不是论文的 `Pack`**——它只有单条/单系数的能力，真正批打包到槽位的是 `RingPack.java`（见 5.2 ④⑤ 与 `PackGoalCheck`） |
 | `LweRlweConversion.java` | **LWE ↔ RLWE 桥**：`extractLwe`（RLWE→LWE，含 `q_R→q_L` 模数切换，产出 `cape.he.LWECiphertext`）、`packLwe`、`rlweSecretAsLweKey`。**调用说明见 `LWE_RLWE桥_调用说明.md`** |
 | `SizeProbe.java` | 实测真实密文的素数分量数与序列化字节数 |
 | `BlindRotateStress.java` | **盲旋转压力测试**：轮数扫描（d=64→512）+ **索引噪声扫描**。就是它测出"噪声零容忍"的那个缺口（见 3.4）。**测试文件暂时保留** |
 | `AnswerPathMini.java` | **最小 ANSWER 链路**：列选择（`CtPtMul`）→ 盲旋转 → `SampleExtract_0` → 三路相加 → 解密。含专项 A3（`a_0 = 0`，见附录 A 第 9 条）。见 5.1 |
+| **`BloomScoring.java`** | **Bloom 打分的槽位域实现（= 二进制同态内积）**：`encryptBloomVector` + `bloomScore`（`CtCtMul` → 行内折叠 → 列旋转）+ `galoisKeysFor`。**实测 5/5**（命中 s = τ、漏位则 s < τ）。**要求候选的 Bloom 已在槽位域**——那一步由 `RingPack` 提供。见 5.2 |
+| **`RingPack.java`** | **★ Ring Packing（LWE → RLWE 打包）= 论文的 `Pack`**：`switchingKey` / `slotSelector` / `pack`。把多条「只加密一个比特」的 LWE 密文打成**一个** RLWE 密文、**每位独占一个槽位**。**实测 6/6**（N=8192），打包产物可直接喂 `BloomScoring`。**调研与实测 → `LWE_RLWE打包_RingPack_调研.md`**。见 5.2 ④~⑥ |
+| **`PackGoalCheck.java`** | **把「`packFromSample` ≠ 论文的 `Pack`」固定成可重跑的断言**（4 条子目标全未达成，属**预期**；结尾指向 `RingPack`） |
+| **`BloomInnerProductProbe.java`** | **裁决实验**：槽位域 vs 系数域各跑一遍二进制内积。结论——**只有槽位域对**，系数域得到无意义的数。见 5.2 |
 | `LweToRgswOps.java` | `LWEtoRGSW`（❌ 未通过；**仅 CAPE-C 需要，本次不做**） |
 | `RgswPolyTest.java`、`RgswPolyDiag.java` | 一般多项式 RGSW 的验证与诊断 |
 | `RgswOps.java` 等 8 个 | ❌ **路线 C 遗留**（自研），已加弃用横幅 |
@@ -728,11 +856,15 @@ resp ← ({ct_vj, ct_score,j})_{j=1}^m
 | **A1** | **统一 Bloom 生成**：抽出一份**双方共用**的 `BF.Gen`，位位置**只依赖关键词**（**顺带修掉第 11 项那个 value 混入哈希的错误**） | 服务端有一份但是 private 且混了 value；**客户端侧没有** | 低（半天） | 补 1 + 第 11 项 |
 | **A2** | **列选择接线**：`BffMatrixLayout.coefficient(column, block, row)` → 拼出明文多项式 `A(X)` → `evaluator.multiplyPlain(ct_col, A(X))` | 两边都各自验过，**但没接起来**（`AnswerPathMini` 里的 `A(X)` 是**手工构造**的） | 低 | R2 |
 | **A3** | **QUERY 编排**：`u_a = h_a(K)` → `(c_a, r_a)` → 列 one-hot 的 RLWE 加密 + 行 `LWE.Enc(r_a)`；以及 `b_qry`、`τ = ‖b_qry‖₁`、`q_BF = RLWE.Enc(b_qry)` | **全缺** | 中 | R5 |
-| **A4** | **Bloom 打分编排**：`ct_score,j ← CtCtMul(q_BF, ct_j^BF)`，再 `Σ_r CtCtAdd(·, CtRotate(·, 2^r))` 折叠出汉明权重 | 算子齐（`CtCtMul`/`CtRotate` 都实测过），**循环没写** | 低 | R4 |
+| **A4** | **Bloom 打分编排**：`ct_score,j ← CtCtMul(q_BF, ct_j^BF)`，再 `Σ_r CtCtAdd(·, CtRotate(·, 2^r))` 折叠出汉明权重 | ✅ **2026-09-27 完成**：打分 = `BloomScoring`（5/5）；**候选进槽位 = `Pack` = `RingPack`（6/6，含负对照）**；两者端到端接上（P2 判据成立）。**剩**：多候选批量布局、`ℓ_BF > N` 的分段 | 低 | R4 |
 | **A5** | **DECODE 编排**：解密 → 指纹校验 → 载荷解析 → `s_j == τ` 判定 → 返回候选 / `⊥` | 明文侧的解析/校验**已有**（`PlaintextFusePirQuery` + `PayloadFingerprint`），缺的是接上密文侧 | 中 | R8 |
 
 **A 清单里没有"研究级"任务**——全是编排 + 一次小重构（A1）。这也印证了第〇节的结论：
 按 CAPE 的基准，**没有"缺某个原语"的硬障碍**。
+
+> **2026-09-27 更新**：**A4 已完成**。原先被列为"待调研"的 `Pack`（Ring Packing）
+> 已实现并端到端验证（`rgsw-lab/RingPack.java`，见 §5.2 ④~⑥ 与
+> `rgsw-lab/LWE_RLWE打包_RingPack_调研.md`）。**A 清单里唯一曾带研究不确定性的项已经消掉。**
 
 ## B. **不是**跑通必需的（论文对齐 / 工程优化 / 性能）
 
@@ -764,6 +896,11 @@ resp ← ({ct_vj, ct_score,j})_{j=1}^m
 > **已解决、不必再挂着的两件**：
 > - ~~"列选择 `Σ CtPtMul` 的机制能否工作"~~ → `AnswerPathMini` 已实测通过；只需接线（A2）。
 > - ~~"`a_i ≡ 0` 场景"~~ → 已修（附录 A 第 9 条）。
+>
+> **2026-09-27 又消掉一件（曾经是 A 清单里唯一带研究不确定性的）**：
+> - ~~"论文的 `Pack`（多条 LWE → 一个槽位域 RLWE）怎么做"~~ → **已实现并端到端验证**
+>   （`RingPack.java` 6/6；原语 = Ring Packing / `RLWE-Pack`，奠基 CDKS21 = ePrint 2020/015）。
+>   见 §5.2 ④~⑥ 与 `rgsw-lab/LWE_RLWE打包_RingPack_调研.md`。
 
 ---
 
@@ -782,6 +919,9 @@ cd coding\rgsw-lab
 .\run-mpc4j.ps1 -Class com.fusepir.rgsw.BlindRotateStress 2048   # 盲旋转压力测试：轮数扫描 + 索引噪声扫描
 .\run-mpc4j.ps1 -Class com.fusepir.rgsw.AnswerPathMini 2048 512  # 最小 ANSWER 链路（列选择→盲旋转→样本提取→三路相加）
 .\run-mpc4j.ps1 -Class com.fusepir.rgsw.LweRlweConversion 2048 32 # LWE↔RLWE 桥（RLWE→LWE 模数切换 / Pack / 三路相加）
+.\run-mpc4j.ps1 -Class com.fusepir.rgsw.BloomInnerProductProbe 4096 # 裁决实验：槽位域 vs 系数域（必须 N≥4096，见 5.2）
+.\run-mpc4j.ps1 -Class com.fusepir.rgsw.BloomScoring 4096        # Bloom 打分（槽位域二进制同态内积，5 项自检）
+.\run-mpc4j.ps1 -Class com.fusepir.rgsw.RingPack 8192 32         # ★ Ring Packing = 论文的 Pack（6 项自检，A4 的最后一环）
 
 # LWE 层（纯 JDK，无依赖；注意：lwe-java/ 下没有 run.ps1，按 README 手动 javac）
 cd coding\lwe-java
@@ -865,6 +1005,39 @@ cd coding\native-jni
       造的索引**都没有误差项**，所以此前一路绿灯。
     - 候选机制 (a)/(b)/(c) 与工作量见 3.4 和整改项 **R3b**。
 
+### ⚠️ 2026-09-27 新增：**三条 SEAL 算子形态约束**（做 Ring Packing 时踩到）
+
+> 这三条都**不是设计选择**，是这套 MPC4J SEAL Java 移植的**硬检查**。
+> **不满足时：有的抛异常（好），有的会静默算错（危险）。**
+> 一句话记法：**mpc4j 的 BFV 密文默认在【系数域】；要"槽位语义"就必须显式转 NTT，而且是两边都转。**
+
+13. **`BatchEncoder.encode` 在这套移植里产出【系数形态】明文**（⚠️ 与 C++ SEAL 不同）
+    - **现象**：`multiplyPlainInplace(ctNtt, ptFromEncode)` 抛 `IllegalArgumentException: NTT form mismatch`。
+    - **根因**：C++ SEAL 的 `BatchEncoder::encode` 直接产出 **NTT 形态**；**这套 Java 移植产出系数形态**。
+    - **修法**：`encode` 之后必须补一次
+      `evaluator.transformToNttInplace(pt, context.firstParmsId())`。
+    - **⚠️ 最危险的一点**：如果形态"碰巧一致"而**不报错**，乘出来只是**多项式乘（卷积）**而不是
+      **槽位逐点乘**——结果全错且**看不出错**。这正是 §5.2 ① 那个裁决实验要单独证明的事。
+
+14. **`addPlain` 在 BFV 下要【非 NTT】密文，而 `setParmsId` 会把明文标成 NTT ⇒ 用不了**
+    - **现象**：`addPlainInplace(ct, pt)` 抛 `plain is not valid for encryption parameters`；
+      先 `transformFromNttInplace(ct)` 转成系数域也照样抛（实测打印出 `pt.isNttForm() == true`，
+      是 `setParmsId` 干的）。
+    - **修法（推荐）**：**别用 `addPlain`**。要加常数 `c`，就预造一条 `RLWE(1)`，
+      然后 **`multiplyPlain(one, 常数明文 c)`** ——纯 `multiplyPlain`，没有形态约束，
+      结果仍是**纯常数**，`RingPack` 就是这么绕的。
+    - 附带：`evaluator.transformToNttInplace(Plaintext, ParmsId)` 与
+      `multiplyPlain(ct, pt, dst)`（**3 参数版**）都不要轻易用——前者是让明文变 NTT 的那一步，
+      后者的 `dst` 是"刚 resize 出来的"、形态标记没填上，一样抛 `NTT form mismatch`。
+      **`multiplyPlainInplace` 才是稳的。**
+
+15. **`bfv_multiply`（密文 × 密文）反过来要求【非 NTT】密文**
+    - **现象**：`BloomScoring.bloomScore` 吃打包产物（NTT）时抛
+      `encrypted1 or encrypted2 cannot be in NTT form`。
+    - **修法**：进 `CtCtMul` 之前先 `copyFrom` 一份并 `transformFromNttInplace`。
+    - **口诀**：**`multiplyPlain`（要槽位语义）= 两边 NTT；`CtCtMul` / `addPlain` = 两边系数。**
+      同一个密文在两步之间来回转，`RingPack` 里两种都出现了。
+
 ### 路线 C 时代的历史坑（代码已弃用，教训保留）
 
 11. **`BigInteger.longValue()` 是有符号截断**：模数升到大整数后，残留的 `p.q.longValue()`
@@ -909,6 +1082,23 @@ cd coding\native-jni
 - ⚠️ **留下 1 个未解决缺口**：索引噪声零容忍（#11，R3b）；
 - 📉 **推翻 1 条旧结论**：`LWEtoRGSW` 不在关键路径上（基准是 CAPE 而非 CAPE-C）。
 
+## B.1b 2026-09-27（Ring Packing 专项）
+
+运行环境：同 B.1（JDK 25 + MPC4J SEAL Java 移植 + Galois 补丁）。
+
+| # | 测试类 | 参数 | 结果 | 说明 |
+|---|---|---|---|---|
+| 16 | **`RingPack`** | **N=8192, n=32** | **6/6 ✅** | **论文的 `Pack` = Ring Packing，实现并端到端验证**（P1 打包 0 错/0 泄漏；P2 喂 `BloomScoring` 得正确 ⟨q,v⟩；P3 负对照；P4 维数扫 n=8/32/128/512；P5a 缩放精确搬运；P5b 缩放噪声 √n 增长） |
+| 17 | **`RingPack`** | **N=4096, n=32** | **P1 ✅ / P2~P4 ❌** | **参数边界的实证**：打包过，但打分侧（多一次 `CtCtMul` + 重线性化 + 折叠）**噪声崩**。⇒ **`N = 8192` 起步** |
+| 18 | `PackGoalCheck` | N=4096 | **4/4 未达成（预期）** | 重新定性：这 4 条测的是 `packFromSample`，而它**本来就不是** `Pack`。现已在结尾打印指向 `RingPack` 的说明 |
+
+**本轮从中得到的结论**：
+
+- ✅ **A 清单里唯一带研究不确定性的项（A4 的 `Pack`）已消掉**；
+- ✅ **论文 `Pack` 的技术出处落实**：Ring Packing / `RLWE-Pack`，奠基 **CDKS21 = ePrint 2020/015**（YPIR 只是使用者）；
+- ⚠️ **新增两条参数事实**：`N = 8192` 起步；`SwK` 规模逼迫放弃 LWE-in-RLWE（`n=N=8192` 时约 12 GB）；
+- 🔧 **新增 3 条 SEAL 形态约束坑**（附录 A 第 13~15 条）：`encode` 产出系数形态、`addPlain` 用不了、`CtCtMul` 要系数域。
+
 ## B.2 复现命令
 
 ```powershell
@@ -923,6 +1113,9 @@ cd coding\rgsw-lab
 .\run-mpc4j.ps1 -Class com.fusepir.rgsw.BlindRotateStress 2048   # #10 #11
 .\run-mpc4j.ps1 -Class com.fusepir.rgsw.AnswerPathMini 2048 512  # #13
 .\run-mpc4j.ps1 -Class com.fusepir.rgsw.AnswerPathMini 4096 512  # #14
+.\run-mpc4j.ps1 -Class com.fusepir.rgsw.RingPack 8192 32          # #16  6/6（约 1 分钟）
+.\run-mpc4j.ps1 -Class com.fusepir.rgsw.RingPack 4096 32          # #17  P1 过、P2~P4 崩（参数边界）
+.\run-mpc4j.ps1 -Class com.fusepir.rgsw.PackGoalCheck             # #18
 
 cd coding\lwe-java                                                # #7 #8（按 lwe-java/README.md 手动 javac）
 ```
@@ -936,6 +1129,8 @@ cd coding\lwe-java                                                # #7 #8（按 
 |---|---|---|
 | **R3b** | 用**真带噪**索引跑 `AnswerPathMini`，量出噪声预算（哪一档开始取错行） | 给出噪声幅度上限；或命中率曲线 |
 | R2 | `DatabasePreprocessor` 产出 `P_{c,b}(X)` 后接进流水线 | 列选择不再依赖手工构造的 `A(X)` |
-| R4 | Bloom 打分循环（`CtCtMul` + `Σ CtRotate`） | 命中 = τ、不命中 < τ |
+| ~~R4~~ | ~~Bloom 打分循环（`CtCtMul` + `Σ CtRotate`）~~ | ✅ **2026-09-27 已补**：`BloomScoring` 5/5 + `RingPack` 6/6，端到端判据成立 |
 | R5 | 客户端 QUERY（坐标拆分 + one-hot 加密） | `u_a = c_a·R + r_a`；one-hot 解密正确 |
 | R8 | 四步端到端（含指纹校验、⊥ 分支） | 命中返回值集，不命中返回 ⊥ |
+| **新** | **`RingPack` 接进真实链路**：`SampleExtract → 缩放 → RingPack → bloomScore` | 用真的 `extractLwe` 输出（而非合成样本）跑通；**需要先定 `sk = (s_L, s_R)` 独立密钥**（否则 `SwK` 约 12 GB） |
+| **新** | **多候选批量打分**：`Σ_j ct_score,j` 的槽位布局 | 一次算出全部候选的得分；`ℓ_BF ≤ N` 的分段策略（R7） |

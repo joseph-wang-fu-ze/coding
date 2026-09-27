@@ -6,6 +6,7 @@ import edu.alibaba.mpc4j.crypto.fhe.seal.Encryptor;
 import edu.alibaba.mpc4j.crypto.fhe.seal.Evaluator;
 import edu.alibaba.mpc4j.crypto.fhe.seal.KeyGenerator;
 import edu.alibaba.mpc4j.crypto.fhe.seal.Plaintext;
+import edu.alibaba.mpc4j.crypto.fhe.seal.RelinKeys;
 import edu.alibaba.mpc4j.crypto.fhe.seal.SecretKey;
 import edu.alibaba.mpc4j.crypto.fhe.seal.context.EncryptionParameters;
 import edu.alibaba.mpc4j.crypto.fhe.seal.context.SchemeType;
@@ -88,6 +89,26 @@ public final class Mpc4jRgsw {
     public final int workingPrimeCount;
     /** 声明模数的位宽（含特殊素数），仅用于展示 */
     public final int declaredQBits;
+
+    /** 重线性化密钥的缓存（懒生成）。做 {@code CtCtMul} 必需。 */
+    private RelinKeys relinKeys;
+
+    /**
+     * 重线性化密钥（懒生成并缓存）。
+     *
+     * <p><b>⚠️ 只有 ≥2 个工作素数时才可用</b>：重线性化需要密钥切换，而 N=2048 时
+     * {@code bfvDefault} 只给 1 个素数，会抛
+     * {@code keyswitching is not supported by the context}。
+     * 实测：<b>N ≥ 4096 才能做密文×密文</b>（N=4096 声明 3 素数/工作 2 素数）。
+     */
+    public RelinKeys relinKeys() {
+        if (relinKeys == null) {
+            RelinKeys keys = new RelinKeys();
+            keyGen.createRelinKeys(keys);
+            relinKeys = keys;
+        }
+        return relinKeys;
+    }
 
     /** @param unused 保留参数（素数个数由 bfvDefault 自动决定） */
     public Mpc4jRgsw(int n, long t, int unused, int base) {

@@ -18,8 +18,8 @@ public final class PayloadBlockProvider {
     }
 
     public static PayloadBlockProvider from(CanonicalDatabase database, CapeParameters parameters, long fingerprintSeed) {
-        BloomParameters bloom = BloomParameters.choose(database.keywordsByValue().values().stream().mapToInt(Set::size).max().orElse(0),
-                parameters.bloomFalsePositiveTarget(), parameters.ringDegreeN());
+        int maxSetSize = database.keywordsByValue().values().stream().mapToInt(Set::size).max().orElse(0);
+        BloomParameters bloom = parameters.bloomParameters(maxSetSize);
         int payloadLength = 3 + 2 + database.maxValues() * (2 + bloom.length());
         Map<String, int[]> values = new TreeMap<>();
         for (KeywordRecord record : database.records()) values.put(record.keyword(), record.values());
@@ -30,6 +30,17 @@ public final class PayloadBlockProvider {
 
     public PayloadLayout layout() { return layout; }
     public Set<String> keywords() { return valuesByKeyword.keySet(); }
+
+    /** 规模摘要（用于判断一组参数是不是"测试规模"） */
+    public String describe() {
+        int tableLength = ArithmeticBffEncoder.tableLength(valuesByKeyword.size());
+        long coefficients = (long) tableLength * layout.payloadLength();
+        return String.format(
+            "关键词=%d, m=%d, h=%d, lBF=%d, payload=%d, L_BFF=%d, 表系数=%,d (%.1f MB @ int32)",
+            valuesByKeyword.size(), layout.maxValueCount(), layout.bloom().hashCount(),
+            layout.bloom().length(), layout.payloadLength(), tableLength,
+            coefficients, coefficients * 4.0 / 1048576.0);
+    }
 
     public void fill(String keyword, int offset, int length, int[] output) {
         if (length < 0 || offset < 0 || offset + length > layout.payloadLength() || output.length != length)
@@ -64,21 +75,14 @@ public final class PayloadBlockProvider {
     }
 
     private static BitSet bloom(int value, Set<String> keywords, BloomParameters parameters) {
-        BitSet bits = new BitSet(parameters.length());
-        for (String keyword : keywords) {
-            byte[] digest = digest(keyword + ":" + value);
-            for (int index = 0; index < parameters.hashCount(); index++) bits.set(Math.floorMod(intAt(digest, index * 4), parameters.length()));
+        // 位位置只依赖关键词 —— 见 BloomParameters.bits() 的说明。
+        // 早期这里写的是 digest(keyword + ":" + value)，把 value 混进了哈希，
+        // 导致客户端的查询向量与服务端候选的位位置对不上（README 第 11 项）。
+        boolean[] bits = parameters.bits(keywords);
+        BitSet result = new BitSet(bits.length);
+        for (int index = 0; index < bits.length; index++) {
+            if (bits[index]) result.set(index);
         }
-        return bits;
-    }
-
-    private static byte[] digest(String value) {
-        try { return MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8)); }
-        catch (Exception exception) { throw new IllegalStateException(exception); }
-    }
-
-    private static int intAt(byte[] bytes, int offset) {
-        int start = offset % (bytes.length - 3);
-        return ByteBuffer.wrap(bytes, start, Integer.BYTES).getInt();
+        return result;
     }
 }
